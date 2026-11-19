@@ -55,14 +55,16 @@ The full design, with diagrams, failure modes and the reasons behind each decisi
 
 ## Tech stack
 
-| Area | Tools |
-|---|---|
-| Backend | Node.js, Express 5, TypeScript, Drizzle ORM, Zod |
-| Database | PostgreSQL |
-| Background jobs | BullMQ on Redis |
-| Frontend | React 19, React Router, TanStack Query, Tailwind CSS, Vite |
-| Testing | Vitest and Supertest, against real Postgres and Redis |
-| Ops | GitHub Actions, Prometheus metrics, Render, Neon, Upstash |
+| Area | Tools | Why |
+|---|---|---|
+| Backend | Node.js, Express 5, TypeScript, Drizzle ORM, Zod | One language front to back, with shared Zod schemas so the API and web app agree. Drizzle stays close to SQL, which the imports and fast lists depend on. |
+| Database | PostgreSQL | Transactions, row locks, constraints, triggers, partial and trigram indexes carry the stock ledger and keep lists fast. |
+| Background jobs | BullMQ on Redis | Retries, recovery of stalled jobs and live progress over pub/sub, without polling the free database awake. |
+| Frontend | React 19, React Router, TanStack Query, Tailwind CSS, Vite | A static app the API serves itself, so there's one service to host. TanStack Query keeps server data cached and in sync across pages. |
+| Testing | Vitest and Supertest, against real Postgres and Redis | Race conditions, locks and constraints only show up against the real thing. |
+| Ops | GitHub Actions, Prometheus metrics, Render, Neon, Upstash | Free hosting for everything ([ADR 0005](docs/adr/0005-free-tier-hosting.md)), and metrics for the load tests. |
+
+What each choice was up against, and what it costs: [ADR 0010](docs/adr/0010-tech-stack.md).
 
 ## Run it locally
 
