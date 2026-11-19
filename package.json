@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Inventory for small retailers, with a background bulk-import pipeline.",
+  "license": "MIT",
   "type": "module",
   "workspaces": [
     "packages/*",

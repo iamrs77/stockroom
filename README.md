@@ -1,119 +1,151 @@
 # Stockroom
 
-Inventory for small retailers: products, stock across several stores, transfers between them, a full history of every change, low-stock alerts sent as signed webhooks, staff accounts, and spreadsheet imports of up to 100,000 rows that run in the background. Built to be correct under concurrency and failure, and to run entirely on free hosting.
+Inventory management for small retail chains. Track stock across stores, move it between them, import big spreadsheets, and see what's running low before it runs out.
 
-**Live demo: [stockroom-5x6w.onrender.com](https://stockroom-5x6w.onrender.com)**. Press **Try the demo** for your own sample business, yours for 24 hours. It runs on free plans, so if nobody has visited for a while the first load takes about a minute while the server wakes up.
+**[Live demo](https://stockroom-5x6w.onrender.com)**: press **Try the demo** to get your own sample business for 24 hours, with no sign-up. It runs on free hosting, so the first visit after a quiet spell can take about a minute while the server wakes up.
 
-![The product list in a demo business, with search, sorting, low-stock badges and the demo banner](docs/images/products.png)
+![The product list, with search, filters and low-stock badges](docs/images/products.png)
 
-![An import of 30,000 rows in progress, with live counts of new products, updates, stock changes and skipped rows](docs/images/import-progress.png)
+## About
 
-![A received transfer from Queen Street West to Kensington Market, with one mug recorded as short](docs/images/transfer.png)
+Stockroom is a full-stack TypeScript app for shops with a few locations. Each business gets a private workspace with its own stores, products and staff.
 
-> **Status:** all five phases are done, and it's [live](https://stockroom-5x6w.onrender.com) on free plans (Render, Neon and Upstash; see [docs/deploy.md](docs/deploy.md)).
+- **Products and stock.** A catalogue with SKUs, prices and reorder points, and the stock in every store at a glance.
+- **Stock history.** Every change (delivery, sale, damage, correction, import or transfer) is recorded with who made it and the balance after it.
+- **Transfers between stores.** Send stock from one store to another, then record what actually arrived.
+- **Bulk imports.** Upload a CSV or Excel file of up to 100,000 rows. It's processed in the background with live progress and a report of any rows that were skipped.
+- **Low-stock alerts.** See what needs reordering, and have alerts sent to your own systems as signed webhooks.
+- **Staff accounts.** Invite staff with single-use links. Staff can move stock; only owners can change prices and settings.
 
-## What's interesting here
+| Bulk import with live progress | A transfer, with what arrived |
+|---|---|
+| ![An import of 30,000 rows in progress](docs/images/import-progress.png) | ![A received transfer with one item recorded as short](docs/images/transfer.png) |
 
-- **Measured, not guessed.** A load-test harness and query plans took the 100,000-product list from 1.6 s to 6 ms for the low-stock filter (275×), and from 902 ms to 6 ms for sorting by stock (150×). The changes: stock totals kept by statement-level triggers, keyset paging, counts that stop at 10,000, and trigram search. The write-up includes the costs (imports 46% slower), a regression found by measuring (a trigger doing 16 million comparisons per chunk), and why there's no cache. ([performance.md](docs/performance.md), [ADR 0009](docs/adr/0009-read-performance.md))
-- **Imports that survive a crash.** Each chunk of 1,000 rows commits together with its checkpoint, so a crashed import resumes exactly where it stopped. In a test, the server was hard-killed partway through a 100,000-row import. After a restart the import finished, and its 197,463 stock changes matched its ledger exactly. ([ADR 0006](docs/adr/0006-bulk-import-pipeline.md))
-- **Postgres records the work, the queue delivers it.** An upload is saved in Postgres before it's queued. If Redis loses the job, a sweeper queues it again. Two workers can never apply the same chunk, because the checkpoint doubles as a fencing token.
-- **Fast on cheap hardware.** A 100,000-row file imports in about 40 seconds on a laptop: each chunk is a handful of set-based SQL statements, not a query per row. Importing the same file again changes nothing, because stock columns are counts, not changes.
-- **A stock ledger that can't oversell.** Every change is an append-only movement written in the same transaction as the balance. A `CHECK (quantity >= 0)` constraint rejects overselling: in tests, 12 simultaneous sales against 5 units give exactly 5 successes. ([ADR 0002](docs/adr/0002-stock-ledger.md))
-- **Events that can't be lost or invented.** Every alert and transfer event is written to an outbox table in the same transaction as the change. A relay hands batches to workers with `FOR UPDATE SKIP LOCKED`, and they're delivered as webhooks signed with HMAC-SHA256, retried with backoff, and logged per attempt. A rolled-back change sends nothing; a committed one can't be lost. ([ADR 0007](docs/adr/0007-outbox-and-webhooks.md))
-- **One lock order, tested against a real race.** Imports, transfers and sales take row locks in the same order, so they can't deadlock. A test holds two sales of one product open at once: it passes with the product lock and fails every time without it. ([ADR 0008](docs/adr/0008-transfers-and-lock-order.md))
-- **Webhooks that can't be aimed inward.** User-supplied URLs are checked against private and metadata address ranges when saved and again at connection time, which also stops DNS rebinding (SSRF).
-- **Least-privilege staff.** Single-use invite links (hashed, expiring). Staff can move stock but not change prices or settings. Removing someone ends their sessions at once and keeps their name on the history.
-- **Safe retries.** Stock changes accept an `Idempotency-Key`, and identical uploads are recognised by their hash, so retried requests don't apply anything twice. ([ADR 0003](docs/adr/0003-idempotency-keys.md))
-- **Live progress** over server-sent events, with one Redis subscription per server process instead of one per viewer.
-- **Observable.** Prometheus metrics for request latency by route, queue depths, the outbox backlog and database pool waits.
-- **A live demo that can't be vandalised.** Each visitor gets their own sandbox business, seeded in about 0.3 s and deleted after 24 hours. Creation is rate-limited and capped, so a free 1 GB database can't fill up. ([deploy.md](docs/deploy.md))
-- **Free hosting, budgeted.** BullMQ's polling and the background timers are tuned so the worst case fits inside Upstash's 500,000 commands and Neon's 100 compute-hours a month, with the calculations written down.
-- **Written down.** [Architecture](docs/architecture.md) with diagrams, a failure-modes table and a scaling plan, [performance](docs/performance.md) with method and results, and [decision records](docs/adr) with the trade-offs.
+## How it works
+
+The project is also a system design exercise: it's built to stay correct when many things happen at once or something fails halfway.
+
+```mermaid
+flowchart LR
+  browser["Browser<br/>React app"]
+  subgraph service["One Node service"]
+    api["REST API<br/>Express"]
+    workers["Background workers<br/>imports, webhooks"]
+  end
+  pg[("PostgreSQL<br/>source of truth")]
+  redis[("Redis<br/>job queues")]
+  ext["Business's webhook URL"]
+
+  browser --> api
+  api --> pg
+  api --> redis
+  workers --> redis
+  workers --> pg
+  workers -- "signed webhooks" --> ext
+```
+
+- **Stock can't go negative or drift.** Every change is written to an append-only ledger in the same transaction as the balance, and a database constraint rejects overselling.
+- **Imports survive crashes.** Files are processed in chunks of 1,000 rows by BullMQ workers. Each chunk is saved together with a checkpoint, so a crashed import resumes where it stopped without applying anything twice.
+- **Events can't be lost.** Alerts and transfer events go through a transactional outbox and are delivered as HMAC-signed webhooks, with retries.
+- **Retries are safe.** Stock changes accept an `Idempotency-Key` header, so a repeated request is applied once.
+- **Fast at 100,000 products.** Load tests and query plans guided the tuning: the low-stock filter went from 1.6 s to 6 ms.
+- **Free to host.** It runs as a single service on Render, with Neon for Postgres and Upstash for Redis, tuned to stay within their free limits.
+
+The full design, with diagrams, failure modes and the reasons behind each decision, is in [docs](#documentation).
+
+## Tech stack
+
+| Area | Tools |
+|---|---|
+| Backend | Node.js, Express 5, TypeScript, Drizzle ORM, Zod |
+| Database | PostgreSQL |
+| Background jobs | BullMQ on Redis |
+| Frontend | React 19, React Router, TanStack Query, Tailwind CSS, Vite |
+| Testing | Vitest and Supertest, against real Postgres and Redis |
+| Ops | GitHub Actions, Prometheus metrics, Render, Neon, Upstash |
 
 ## Run it locally
 
-No Docker needed: `npm run db` starts a real PostgreSQL server from an npm package.
+### Prerequisites
 
-**Requirements:** Node.js 22.12 or later, and Redis 6.2 or later on `localhost:6379`. On Windows, Redis runs in WSL: `wsl -d Ubuntu -- redis-server --daemonize yes`.
+- **Node.js 22.12 or later**
+- **Redis 6.2 or later**, running on `localhost:6379`:
+  - macOS: `brew install redis && brew services start redis`
+  - Linux: `sudo apt install redis-server`
+  - Windows: install Redis inside WSL (`sudo apt install redis-server`), then start it with `wsl -- redis-server --daemonize yes`
+
+You don't need Docker or a Postgres install: `npm run dev` downloads and starts a local Postgres server for you.
+
+### Start the app
 
 ```bash
+git clone https://github.com/iamrs77/stockroom.git
+cd stockroom
 npm install
-npm run dev        # starts Postgres (port 5433), the API and background workers (3000), and the web app (5173)
+npm run dev
 ```
 
-In a second terminal, add the demo data once:
+This starts Postgres (port 5433), the API and background workers (port 3000), and the web app (port 5173). Database migrations run automatically.
+
+Open **http://localhost:5173** and either:
+
+- press **Try the demo** for a sample business, or
+- create your own account.
+
+### Optional: sample data
+
+In a second terminal, create a demo account with 3 stores and 136 products:
 
 ```bash
 npm run db:seed
 ```
 
-Open http://localhost:5173 and choose **Try the demo** for a private sandbox business, or **Fill in the local demo account** (`demo@stockroom.app` / `stockroom-demo`), or create your own account.
+Sign in with `demo@stockroom.app` / `stockroom-demo`.
 
-To try a big import, generate a file for the demo business's stores and upload it on the **Imports** page:
+To try a large import, generate a file and upload it on the **Imports** page while signed in to that account (the **Try the demo** businesses are limited to 2,000 rows):
 
 ```bash
-npm run sample:import -- --rows 100000     # writes .data/imports/sample-100000.csv
+npm run sample:import -- --rows 100000   # writes .data/imports/sample-100000.csv
 ```
 
-In development, webhooks may point at `localhost`, so you can test them with a local receiver. Production only allows public `https` URLs.
+### Settings and resetting
 
-Postgres keeps its data in `.data/postgres`. Delete that folder to start fresh.
+No configuration is needed locally. To change a setting, copy `.env.example` to `.env`; every option is described there.
 
-### Scripts
+Local data lives in `.data/postgres`. Stop the app and delete that folder to start fresh.
+
+## Scripts
 
 | Command | What it does |
 |---|---|
-| `npm run dev` | Postgres, API, worker and web app together, with reload on change |
-| `npm run db` | Only the local Postgres server |
-| `npm run db:seed` | Recreates the demo business: 3 stores, 136 products, opening stock |
-| `npm run sample:import` | Writes a large import file with a few deliberate mistakes (`--rows`, `--stores`, `--bad`) |
-| `npm test` | API and import tests against a throwaway Postgres and your local Redis |
+| `npm run dev` | Starts Postgres, the API, the workers and the web app, reloading on changes |
+| `npm test` | Runs the tests against a temporary Postgres and your local Redis |
 | `npm run typecheck` | Type-checks every package |
-| `npm run build` | Builds the web app and bundles the server |
-| `npm start` | Runs the production build: one process serving the API and web app, and processing imports |
-| `npm run db:generate` | Generates a migration after a change to `apps/server/src/db/schema.ts` |
-| `npm run bench` | Load-tests the API against a 100,000-product business and prints a table (`--label`, `--compare`, `--only`) |
-| `npm run explain` | Prints query plans for the product list's main queries |
+| `npm run build` | Builds the web app and the server |
+| `npm start` | Runs the production build |
+| `npm run db:seed` | Recreates the demo account and its data |
+| `npm run sample:import` | Writes a large import file (`--rows`, `--stores`, `--bad`) |
+| `npm run bench` | Load-tests the API against 100,000 products |
 
-## Stack
-
-| | |
-|---|---|
-| **API** | Node.js, Express 5, TypeScript, Drizzle ORM, PostgreSQL, Zod, pino |
-| **Background jobs** | BullMQ on Redis: imports and webhook delivery; a transactional outbox in Postgres; CSV via `csv-parse`, Excel via `read-excel-file` |
-| **Web** | React 19, React Router, TanStack Query, Tailwind CSS, Vite; live progress over server-sent events |
-| **Tests** | Vitest and Supertest against real Postgres and Redis (no mocks) |
-| **Performance** | autocannon load tests, `EXPLAIN ANALYZE`, Prometheus metrics via prom-client |
-
-## Project layout
+## Project structure
 
 ```
 apps/
-  server/            Express API and background workers; serves the built web app in production
-    src/modules/     auth, stores, products, stock, imports, transfers, alerts, events, webhooks, team
-    src/http/        auth, idempotency, validation and error middleware
-    src/db/          schema, migrations, seed data
-    drizzle/         generated SQL migrations
-    test/            API, import and failure tests
-  web/               React app
+  server/      Express API and background workers (serves the web app in production)
+  web/         React app
 packages/
-  shared/            Zod schemas and types shared by the API and the web app
-docs/
-  architecture.md    how it works, failure modes, scaling plan
-  deploy.md          free deployment: Render, Neon, Upstash, with budgets
-  performance.md     load tests, query plans, trade-offs
-  adr/               decision records
-scripts/
-  dev-db.ts          local Postgres without Docker
-  generate-import.ts sample import files
-  bench.ts           load tests
-  explain.ts         query plans
+  shared/      Validation schemas and types shared by the server and the web app
+docs/          Architecture, performance results, deployment guide, decision records
+scripts/       Local database, sample files, load tests
 ```
 
-## Roadmap
+## Documentation
 
-- [x] **Phase 1: foundation.** Accounts and businesses, stores, products, the stock ledger, idempotency keys, tests and CI
-- [x] **Phase 2: bulk imports.** CSV and Excel files of up to 100,000 rows, processed in the background in chunks that resume after a crash, with live progress and a per-row problem report
-- [x] **Phase 3: operations.** Transfers between stores, low-stock alerts through a transactional outbox, signed webhooks with retries, staff accounts with invite links
-- [x] **Phase 4: performance.** Load tests and query plans; stock totals kept by triggers, keyset paging, capped counts and trigram search; Prometheus metrics. [Results](docs/performance.md)
-- [x] **Phase 5: live demo.** [Deployed for free](https://stockroom-5x6w.onrender.com) on Render, Neon and Upstash, with a private sandbox business per visitor that's deleted after a day
+- [Architecture](docs/architecture.md): how the pieces fit together, the data model, failure modes and the scaling plan
+- [Performance](docs/performance.md): load-test method, results and trade-offs
+- [Deployment](docs/deploy.md): deploying for free on Render, Neon and Upstash
+- [Decision records](docs/adr): why each major design choice was made, and what it costs
+
+## License
+
+[MIT](LICENSE)
