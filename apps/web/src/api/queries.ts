@@ -88,9 +88,11 @@ export function useLogout() {
   return useMutation({
     mutationFn: () => api<void>('/auth/logout', { method: 'POST' }),
     onSettled: () => {
-      // Drop everything cached for this business before showing the sign-in page.
-      queryClient.clear();
+      // Mark the session as ended first: the route guard is watching this query and shows the sign-in page.
+      // Clearing the whole cache first would detach the guard from it, leaving the app on screen with no user.
       queryClient.setQueryData(keys.me, null);
+      // Then drop everything cached for the business that was signed in.
+      queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== keys.me[0] });
     },
   });
 }
