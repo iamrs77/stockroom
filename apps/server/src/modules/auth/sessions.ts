@@ -29,14 +29,19 @@ export async function findSession(db: Db, token: string): Promise<AuthContext | 
       role: users.role,
       tenantId: tenants.id,
       tenantName: tenants.name,
+      tenantDemoExpiresAt: tenants.demoExpiresAt,
     })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
     .innerJoin(tenants, eq(tenants.id, users.tenantId))
     .where(and(eq(sessions.id, hashToken(token)), gt(sessions.expiresAt, new Date()), isNull(users.deactivatedAt)));
   if (!row) return undefined;
-  const { tenantId, tenantName, ...rest } = row;
-  return { ...rest, role: rest.role as Role, tenant: { id: tenantId, name: tenantName } };
+  const { tenantId, tenantName, tenantDemoExpiresAt, ...rest } = row;
+  return {
+    ...rest,
+    role: rest.role as Role,
+    tenant: { id: tenantId, name: tenantName, demoExpiresAt: tenantDemoExpiresAt?.toISOString() ?? null },
+  };
 }
 
 /** Pushes the expiry forward for active users, at most once per day per session. */
@@ -61,6 +66,15 @@ export function setSessionCookie(res: Response, token: string, expires: Date, se
   res.cookie(SESSION_COOKIE, token, cookieOptions(secure, expires));
 }
 
-export function toSessionUser(auth: SessionUser): SessionUser {
-  return { id: auth.id, email: auth.email, name: auth.name, role: auth.role, tenant: auth.tenant };
+type UserLike = Omit<SessionUser, 'tenant'> & { tenant: { id: string; name: string; demoExpiresAt?: Date | string | null } };
+
+export function toSessionUser(user: UserLike): SessionUser {
+  const expires = user.tenant.demoExpiresAt;
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    tenant: { id: user.tenant.id, name: user.tenant.name, demoExpiresAt: expires instanceof Date ? expires.toISOString() : (expires ?? null) },
+  };
 }

@@ -57,6 +57,13 @@
       "when": 1795113344893,
       "tag": "0007_faster-total-trigger",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795114612662,
+      "tag": "0008_demo-sandboxes",
+      "breakpoints": true
     }
   ]
 }

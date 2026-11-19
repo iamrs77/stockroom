@@ -1,7 +1,7 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { ApiError } from '../api/client';
-import { useLogin, useRegister } from '../api/queries';
+import { useLogin, usePublicConfig, useRegister, useStartDemo } from '../api/queries';
 import { Logo } from '../components/AppLayout';
 import { Alert, Button, Card, Field, Input } from '../components/ui';
 
@@ -26,9 +26,33 @@ function useAfterAuth() {
   return () => navigate(from ?? '/products', { replace: true });
 }
 
+/** "Try the demo": a private sample business for this visitor, no sign-up needed. */
+function TryDemo() {
+  const { data: config } = usePublicConfig();
+  const start = useStartDemo();
+  const done = useAfterAuth();
+  if (!config?.demoEnabled) return null;
+  return (
+    <div className="mb-6 flex flex-col gap-3 rounded-lg border border-accent/40 bg-accent-bg p-4">
+      <div>
+        <p className="font-medium">Look around first?</p>
+        <p className="text-sm text-muted">
+          Get your own sample business with three stores and 136 products. No sign-up. It&rsquo;s yours for{' '}
+          {config.demoHours} hours.
+        </p>
+      </div>
+      {start.error && <Alert>{start.error.message}</Alert>}
+      <Button onClick={() => start.mutate(undefined, { onSuccess: done })} loading={start.isPending}>
+        Try the demo
+      </Button>
+    </div>
+  );
+}
+
 export function LoginPage() {
   const login = useLogin();
   const done = useAfterAuth();
+  const { data: config } = usePublicConfig();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const fieldErrors = login.error instanceof ApiError ? login.error.fieldErrors() : {};
@@ -42,14 +66,17 @@ export function LoginPage() {
     <AuthShell
       title="Sign in"
       footer={
-        <>
-          New here?{' '}
-          <Link to="/register" className="font-medium text-accent hover:underline">
-            Create an account
-          </Link>
-        </>
+        config?.signupsEnabled !== false && (
+          <>
+            New here?{' '}
+            <Link to="/register" className="font-medium text-accent hover:underline">
+              Create an account
+            </Link>
+          </>
+        )
       }
     >
+      <TryDemo />
       <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
         {login.error && !Object.keys(fieldErrors).length && <Alert>{login.error.message}</Alert>}
         <Field label="Email" error={fieldErrors.email}>
@@ -69,16 +96,19 @@ export function LoginPage() {
         <Button type="submit" loading={login.isPending} className="mt-1">
           Sign in
         </Button>
-        <button
-          type="button"
-          className="text-sm text-muted hover:text-ink"
-          onClick={() => {
-            setEmail('demo@stockroom.app');
-            setPassword('stockroom-demo');
-          }}
-        >
-          Fill in the demo account
-        </button>
+        {/* The fixed demo login only exists in local development (npm run db:seed). */}
+        {import.meta.env.DEV && (
+          <button
+            type="button"
+            className="text-sm text-muted hover:text-ink"
+            onClick={() => {
+              setEmail('demo@stockroom.app');
+              setPassword('stockroom-demo');
+            }}
+          >
+            Fill in the local demo account
+          </button>
+        )}
       </form>
     </AuthShell>
   );
@@ -108,6 +138,7 @@ export function RegisterPage() {
         </>
       }
     >
+      <TryDemo />
       <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
         {register.error && !Object.keys(fieldErrors).length && <Alert>{register.error.message}</Alert>}
         <Field label="Business name" error={fieldErrors.businessName}>

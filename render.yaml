@@ -1,0 +1,49 @@
+# Render Blueprint: one free web service running the API, the web app and the background workers.
+# Postgres (Neon) and Redis (Upstash) are separate free services; see docs/deploy.md.
+services:
+  - type: web
+    name: stockroom
+    runtime: node
+    plan: free
+    region: ohio # next to Neon's aws-us-east-2 (Ohio)
+    # Dev dependencies are needed to build (Vite, esbuild), even though NODE_ENV is production.
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    # Deploy only after GitHub Actions CI passes on main.
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # 512 MB instance: leave room for the process outside the JavaScript heap.
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=384
+      - key: DATABASE_URL
+        sync: false # Neon direct connection string (not the -pooler one)
+      - key: REDIS_URL
+        sync: false # Upstash rediss:// connection string
+      - key: REDIS_PREFIX
+        value: stockroom
+      - key: DATABASE_POOL_MAX
+        value: "5"
+      # The public demo offers sandboxes; open sign-ups could fill a 1 GB free database.
+      - key: SIGNUPS_ENABLED
+        value: "false"
+      - key: IMPORT_MAX_ROWS
+        value: "20000"
+      - key: DEMO_IMPORT_MAX_ROWS
+        value: "2000"
+      - key: IMPORT_CONCURRENCY
+        value: "1"
+      # Free-tier budgets (docs/deploy.md): idle BullMQ workers poll Redis less often, and safety
+      # nets run every 30 minutes so an idle app lets Neon's compute sleep.
+      - key: QUEUE_DRAIN_DELAY_SECONDS
+        value: "60"
+      - key: QUEUE_STALLED_INTERVAL_MS
+        value: "120000"
+      - key: OUTBOX_POLL_MS
+        value: "1800000"
+      - key: SWEEP_INTERVAL_MS
+        value: "1800000"
+      - key: METRICS_TOKEN
+        generateValue: true

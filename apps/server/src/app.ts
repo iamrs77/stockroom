@@ -13,6 +13,7 @@ import type { Logger } from './logger';
 import { measureRequests, metricsEndpoint } from './metrics';
 import { alertsRouter } from './modules/alerts/routes';
 import { authRouter } from './modules/auth/routes';
+import { demoRouter } from './modules/demo/routes';
 import type { ImportEvents } from './modules/imports/events';
 import type { ImportQueue } from './modules/imports/queue';
 import { importsRouter } from './modules/imports/routes';
@@ -77,6 +78,7 @@ export function createApp(deps: AppDeps) {
   });
 
   api.use('/auth', authRouter(deps));
+  api.use(demoRouter(deps)); // GET /config and POST /demo, before sign-in
   api.use('/invites', invitesPublicRouter(deps));
   api.use(requireAuth(deps));
   api.use('/stores', storesRouter(deps));

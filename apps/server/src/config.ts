@@ -25,6 +25,30 @@ const envSchema = z.object({
   OUTBOX_POLL_MS: z.coerce.number().int().positive().default(30_000),
   /** Bearer token for GET /metrics. Without it the endpoint is off in production. */
   METRICS_TOKEN: z.string().min(16).optional(),
+  /** Whether anyone can create a business. A public demo can turn this off and offer sandboxes only. */
+  SIGNUPS_ENABLED: z.stringbool().default(true),
+  /** "Try the demo": a private sandbox business per visitor, deleted after DEMO_TTL_HOURS. */
+  DEMO_ENABLED: z.stringbool().default(true),
+  DEMO_TTL_HOURS: z.coerce.number().positive().default(24),
+  /** Sandboxes that can exist at once, so a free database can't fill up. */
+  DEMO_MAX_ACTIVE: z.coerce.number().int().positive().default(100),
+  /** Sandboxes one IP address can create per hour. */
+  DEMO_RATE_LIMIT: z.coerce.number().int().positive().default(10),
+  IMPORT_MAX_ROWS: z.coerce.number().int().positive().max(100_000).default(100_000),
+  DEMO_IMPORT_MAX_ROWS: z.coerce.number().int().positive().default(2_000),
+  /**
+   * How long an idle queue worker blocks on Redis before asking again, and how often it checks for
+   * stalled jobs. Hosted Redis plans that count commands (Upstash free: 500,000 a month) need these
+   * raised: see docs/deploy.md.
+   */
+  QUEUE_DRAIN_DELAY_SECONDS: z.coerce.number().int().positive().default(5),
+  QUEUE_STALLED_INTERVAL_MS: z.coerce.number().int().positive().default(30_000),
+  /**
+   * How often the safety nets run (re-queueing lost imports and webhooks, deleting expired demos).
+   * Unset: every 1 to 10 minutes. On a database that sleeps when idle (Neon free), set it to 30
+   * minutes so an idle app lets the database sleep: see docs/deploy.md.
+   */
+  SWEEP_INTERVAL_MS: z.coerce.number().int().positive().optional(),
 });
 
 export type Config = {
@@ -48,6 +72,12 @@ export type Config = {
   webhookRetryDelayMs: number;
   outboxPollMs: number;
   metricsToken?: string;
+  signupsEnabled: boolean;
+  demo: { enabled: boolean; ttlMs: number; maxActive: number; rateLimit: number };
+  importMaxRows: number;
+  demoImportMaxRows: number;
+  queue: { drainDelaySeconds: number; stalledIntervalMs: number };
+  sweepIntervalMs?: number;
 };
 
 const LOCAL_DATABASE_URL = 'postgres://postgres:postgres@localhost:5433/stockroom';
@@ -101,5 +131,16 @@ export function loadConfig(): Config {
     webhookRetryDelayMs: env.WEBHOOK_RETRY_DELAY_MS,
     outboxPollMs: env.OUTBOX_POLL_MS,
     metricsToken: env.METRICS_TOKEN,
+    signupsEnabled: env.SIGNUPS_ENABLED,
+    demo: {
+      enabled: env.DEMO_ENABLED,
+      ttlMs: env.DEMO_TTL_HOURS * 60 * 60 * 1000,
+      maxActive: env.DEMO_MAX_ACTIVE,
+      rateLimit: env.DEMO_RATE_LIMIT,
+    },
+    importMaxRows: env.IMPORT_MAX_ROWS,
+    demoImportMaxRows: env.DEMO_IMPORT_MAX_ROWS,
+    queue: { drainDelaySeconds: env.QUEUE_DRAIN_DELAY_SECONDS, stalledIntervalMs: env.QUEUE_STALLED_INTERVAL_MS },
+    sweepIntervalMs: env.SWEEP_INTERVAL_MS,
   };
 }

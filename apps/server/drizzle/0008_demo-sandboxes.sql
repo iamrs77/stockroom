@@ -1,0 +1,2 @@
+ALTER TABLE "tenants" ADD COLUMN "demo_expires_at" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "tenants_demo_expires_idx" ON "tenants" USING btree ("demo_expires_at") WHERE demo_expires_at is not null;

@@ -1,7 +1,7 @@
 import { IMPORT_MAX_ROWS, type ImportSummary } from '@stockroom/shared';
 import { and, count, eq, inArray, sql } from 'drizzle-orm';
 import { pgError, PG_UNIQUE_VIOLATION, type Db } from '../../db/client';
-import { importErrors, importFiles, imports, stores } from '../../db/schema';
+import { importErrors, importFiles, imports, stores, tenants } from '../../db/schema';
 import type { Logger } from '../../logger';
 import { importRowsProcessed } from '../../metrics';
 import { recordEvent } from '../events/outbox';
@@ -32,6 +32,9 @@ export type ProcessOptions = {
   publish?: (summary: ImportSummary) => Promise<void> | void;
   /** Tells the outbox relay that new events may have been committed (alerts, completion). */
   pokeOutbox?: () => void;
+  /** Most data rows a file may have, for real businesses and for demo sandboxes. */
+  maxRows?: number;
+  demoMaxRows?: number;
   /** Test hook, called after each committed chunk. */
   afterChunk?: (processedRows: number) => Promise<void> | void;
 };
@@ -74,8 +77,13 @@ export async function processImport(db: Db, importId: string, options: ProcessOp
     if (!header) throw new ImportFileError('The file is empty.');
     const columns = mapColumns(header, tenantStores);
     if (totalRows === 0) throw new ImportFileError('The file has a header but no rows.');
-    if (totalRows > IMPORT_MAX_ROWS) {
-      throw new ImportFileError(`The file has ${totalRows.toLocaleString('en-CA')} rows. The limit is ${IMPORT_MAX_ROWS.toLocaleString('en-CA')}.`);
+    const [owner] = await db.select({ demoExpiresAt: tenants.demoExpiresAt }).from(tenants).where(eq(tenants.id, job.tenantId));
+    const isDemo = !!owner?.demoExpiresAt;
+    const maxRows = isDemo ? (options.demoMaxRows ?? IMPORT_MAX_ROWS) : (options.maxRows ?? IMPORT_MAX_ROWS);
+    if (totalRows > maxRows) {
+      throw new ImportFileError(
+        `The file has ${totalRows.toLocaleString('en-CA')} rows. The limit ${isDemo ? 'for demo businesses ' : ''}is ${maxRows.toLocaleString('en-CA')}.`,
+      );
     }
     if (job.totalRows !== totalRows) {
       await db.update(imports).set({ totalRows, updatedAt: sql`now()` }).where(eq(imports.id, importId));

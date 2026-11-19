@@ -34,6 +34,9 @@ export function authRouter(deps: AppDeps) {
   });
 
   router.post('/register', limiter, async (req, res) => {
+    if (!config.signupsEnabled) {
+      throw new HttpError(403, 'signups_disabled', 'New accounts are turned off here. Try the demo instead.');
+    }
     const input = parse(registerSchema, req.body);
     const passwordHash = await hashPassword(input.password);
 
@@ -71,7 +74,7 @@ export function authRouter(deps: AppDeps) {
         name: users.name,
         role: users.role,
         passwordHash: users.passwordHash,
-        tenant: { id: tenants.id, name: tenants.name },
+        tenant: { id: tenants.id, name: tenants.name, demoExpiresAt: tenants.demoExpiresAt },
       })
       .from(users)
       .innerJoin(tenants, eq(tenants.id, users.tenantId))

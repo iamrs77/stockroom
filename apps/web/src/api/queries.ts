@@ -7,6 +7,7 @@ import {
   type InviteCreated,
   type InvitePreview,
   type LowStockAlert,
+  type PublicConfig,
   type Role,
   type Team,
   type TransferCreateInput,
@@ -418,5 +419,23 @@ export function useWebhookDeliveries(id: string, enabled: boolean) {
     queryFn: async () => (await api<{ items: WebhookDelivery[] }>(`/webhooks/${id}/deliveries`)).items,
     enabled,
     refetchInterval: (query) => (query.state.data?.some((d) => d.status === 'pending') ? 2000 : false),
+  });
+}
+
+// ---- Public config and the demo ----
+
+export function usePublicConfig() {
+  return useQuery({ queryKey: ['config'], queryFn: () => api<PublicConfig>('/config'), staleTime: Infinity });
+}
+
+/** Creates a private demo business for this visitor and signs them in to it. */
+export function useStartDemo() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api<{ user: SessionUser }>('/demo', { method: 'POST' }),
+    onSuccess: ({ user }) => {
+      queryClient.removeQueries({ predicate: (q) => q.queryKey[0] !== 'config' });
+      queryClient.setQueryData(keys.me, user);
+    },
   });
 }

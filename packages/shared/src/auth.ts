@@ -29,5 +29,21 @@ export type SessionUser = {
   email: string;
   name: string;
   role: Role;
-  tenant: { id: string; name: string };
+  tenant: {
+    id: string;
+    name: string;
+    /** Set for a demo sandbox: when it will be deleted. */
+    demoExpiresAt: string | null;
+  };
+};
+
+/** What the sign-in page needs to know before anyone signs in. */
+export type PublicConfig = {
+  signupsEnabled: boolean;
+  demoEnabled: boolean;
+  /** Most rows an import may have, for real businesses and for demo sandboxes. */
+  importMaxRows: number;
+  demoImportMaxRows: number;
+  /** How long a demo sandbox lasts. */
+  demoHours: number;
 };

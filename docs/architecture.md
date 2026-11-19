@@ -298,6 +298,9 @@ Postgres row-level security would add a fourth layer that holds even if a query 
 | Two relays run at once | `SKIP LOCKED` gives each a different batch. A delivery is unique per (endpoint, event), so nothing is sent twice. |
 | Two people receive the same transfer | The guarded status update lets one through; the other gets 409. Stock is added once. Tested with three at once. |
 | Two people use the same invite link | One account is created; the others get 410. Tested. |
+| The free instance sleeps (15 idle minutes), restarts or is redeployed mid-import | `SIGTERM` hands the import back to the queue after the current chunk; it resumes from its checkpoint when the app wakes. Expired demos are swept on start-up, so a sleep can't leave them behind. |
+| A visitor's demo expires | Its business is deleted with everything in it (cascading keys), in batches of 20, every sweep; its session stops working at the same moment. Tested. |
+| Someone scripts "Try the demo" | 10 demos per IP per hour, and at most 100 at once (`DEMO_MAX_ACTIVE`), then 503 "try again shortly". |
 | Same file uploaded twice (double-click, retried request) | A unique index on (tenant, file hash) among active imports returns the existing import instead of starting another |
 | A row has bad data | That row is skipped and reported with its row number and column; the rest still import |
 | The file itself is wrong (no `sku` column, unknown store code, too many rows) | The import fails before writing anything, with a message saying what to fix |

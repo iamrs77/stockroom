@@ -45,6 +45,11 @@ export function setupTestApp({ worker: withWorker = false, webhooks: withWebhook
     webhookTimeoutMs: 2000,
     webhookRetryDelayMs: 100,
     outboxPollMs: 200,
+    signupsEnabled: true,
+    demo: { enabled: true, ttlMs: 24 * 60 * 60 * 1000, maxActive: 1000, rateLimit: 1000 },
+    importMaxRows: 100_000,
+    demoImportMaxRows: 2_000,
+    queue: { drainDelaySeconds: 5, stalledIntervalMs: 30_000 },
     ...overrides,
   };
 

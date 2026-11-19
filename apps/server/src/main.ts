@@ -51,6 +51,11 @@ const importWorker = runsWorker
       concurrency: config.importConcurrency,
       chunkSize: config.importChunkSize,
       pokeOutbox: outbox.poke,
+      maxRows: config.importMaxRows,
+      demoMaxRows: config.demoImportMaxRows,
+      drainDelaySeconds: config.queue.drainDelaySeconds,
+      stalledIntervalMs: config.queue.stalledIntervalMs,
+      sweepEveryMs: config.sweepIntervalMs,
     })
   : undefined;
 const webhookWorker = runsWorker
@@ -62,9 +67,12 @@ const webhookWorker = runsWorker
       webhookQueue,
       allowPrivate: config.webhooksAllowPrivate,
       timeoutMs: config.webhookTimeoutMs,
+      drainDelaySeconds: config.queue.drainDelaySeconds,
+      stalledIntervalMs: config.queue.stalledIntervalMs,
+      sweepEveryMs: config.sweepIntervalMs,
     })
   : undefined;
-const janitor = runsWorker ? startJanitor({ db, logger }) : undefined;
+const janitor = runsWorker ? startJanitor({ db, logger, demoSweepMs: config.sweepIntervalMs }) : undefined;
 registerRuntimeGauges({ db, pool, queues: { imports: importQueue.queue, webhooks: webhookQueue.queue } });
 if (runsWorker) logger.info({ importConcurrency: config.importConcurrency }, 'Background workers started');
 

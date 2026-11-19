@@ -62,6 +62,11 @@ export type ImportWorkerOptions = {
   chunkSize: number;
   /** Tells the outbox relay about events committed by an import (alerts, completion). */
   pokeOutbox?: () => void;
+  maxRows?: number;
+  demoMaxRows?: number;
+  /** BullMQ polling: raise these on Redis plans that count commands. */
+  drainDelaySeconds?: number;
+  stalledIntervalMs?: number;
   /** How often to look for imports the queue lost, and how old they must be. */
   sweepEveryMs?: number;
   staleAfterMs?: number;
@@ -81,6 +86,8 @@ export function startImportWorker(options: ImportWorkerOptions) {
         signal: stopping.signal,
         publish: (summary) => events.publish(summary),
         pokeOutbox: options.pokeOutbox,
+        maxRows: options.maxRows,
+        demoMaxRows: options.demoMaxRows,
       });
       if (outcome === 'busy' || outcome === 'stopped') {
         // Put the job back without using up an attempt: "busy" waits for this business's other
@@ -96,6 +103,8 @@ export function startImportWorker(options: ImportWorkerOptions) {
       concurrency: options.concurrency,
       // A free instance can be paused or restarted mid-import. Work resumes from the checkpoint, so allow a few stalls.
       maxStalledCount: 3,
+      drainDelay: options.drainDelaySeconds ?? 5,
+      stalledInterval: options.stalledIntervalMs ?? 30_000,
     },
   );
 

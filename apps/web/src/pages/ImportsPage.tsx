@@ -2,7 +2,7 @@ import { IMPORT_MAX_BYTES, isImportFinished } from '@stockroom/shared';
 import { Download, FileSpreadsheet, Upload } from 'lucide-react';
 import { useRef, useState, type DragEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { useImports, useUploadImport } from '../api/queries';
+import { useImports, useMe, usePublicConfig, useUploadImport } from '../api/queries';
 import { ImportProgressBar, ImportStatusBadge } from '../components/ImportStatus';
 import { useIsOwner } from '../components/AppLayout';
 import { Alert, Card, cx, PageHeader, Spinner } from '../components/ui';
@@ -53,6 +53,9 @@ export function ImportsPage() {
 }
 
 function UploadCard() {
+  const { data: config } = usePublicConfig();
+  const isDemo = !!useMe().data?.tenant.demoExpiresAt;
+  const maxRows = (isDemo ? config?.demoImportMaxRows : config?.importMaxRows) ?? 100_000;
   const upload = useUploadImport();
   const navigate = useNavigate();
   const input = useRef<HTMLInputElement>(null);
@@ -97,7 +100,9 @@ function UploadCard() {
         </span>
         <div>
           <p className="font-medium">Drop a CSV or Excel file here</p>
-          <p className="mt-1 text-sm text-muted">Up to 100,000 rows or {formatBytes(IMPORT_MAX_BYTES)}</p>
+          <p className="mt-1 text-sm text-muted">
+            Up to {formatNumber(maxRows)} rows{isDemo && ' in a demo business'} or {formatBytes(IMPORT_MAX_BYTES)}
+          </p>
         </div>
         <button
           type="button"

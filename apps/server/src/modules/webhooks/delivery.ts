@@ -77,6 +77,9 @@ export type WebhookWorkerOptions = {
   timeoutMs: number;
   sweepEveryMs?: number;
   staleAfterMs?: number;
+  /** BullMQ polling: raise these on Redis plans that count commands. */
+  drainDelaySeconds?: number;
+  stalledIntervalMs?: number;
 };
 
 /** Sends one delivery attempt and records the outcome. Throws on failure so the queue retries. */
@@ -142,7 +145,13 @@ export function startWebhookWorker(options: WebhookWorkerOptions) {
     WEBHOOK_QUEUE,
     (job) => attemptDelivery(db, job.data.deliveryId, options),
     // Deliveries mostly wait on the network, so several can run at once without using much CPU.
-    { connection, prefix: options.prefix, concurrency: 5 },
+    {
+      connection,
+      prefix: options.prefix,
+      concurrency: 5,
+      drainDelay: options.drainDelaySeconds ?? 5,
+      stalledInterval: options.stalledIntervalMs ?? 30_000,
+    },
   );
   worker.on('failed', (job, err) => {
     if (!job) return;

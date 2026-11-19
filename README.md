@@ -8,7 +8,7 @@ Inventory for small retailers: products, stock across several stores, transfers 
 
 ![A received transfer from Queen Street West to Kensington Market, with one mug recorded as short](docs/images/transfer.png)
 
-> **Status:** phases 1 to 4 of 5 are done: the stock ledger, background imports, transfers, low-stock alerts through a transactional outbox, webhooks, staff accounts, and measured performance work. See the [roadmap](#roadmap).
+> **Status:** feature-complete and ready to deploy for free (Render, Neon and Upstash; see [docs/deploy.md](docs/deploy.md)). On the live demo, **Try the demo** gives each visitor a private sample business for 24 hours. See the [roadmap](#roadmap).
 
 ## What's interesting here
 
@@ -24,6 +24,8 @@ Inventory for small retailers: products, stock across several stores, transfers 
 - **Safe retries.** Stock changes accept an `Idempotency-Key`, and identical uploads are recognised by their hash, so retried requests don't apply anything twice. ([ADR 0003](docs/adr/0003-idempotency-keys.md))
 - **Live progress** over server-sent events, with one Redis subscription per server process instead of one per viewer.
 - **Observable.** Prometheus metrics for request latency by route, queue depths, the outbox backlog and database pool waits.
+- **A live demo that can't be vandalised.** Each visitor gets their own sandbox business, seeded in about 0.3 s and deleted after 24 hours. Creation is rate-limited and capped, so a free 1 GB database can't fill up. ([deploy.md](docs/deploy.md))
+- **Free hosting, budgeted.** BullMQ's polling and the background timers are tuned so the worst case fits inside Upstash's 500,000 commands and Neon's 100 compute-hours a month, with the calculations written down.
 - **Written down.** [Architecture](docs/architecture.md) with diagrams, a failure-modes table and a scaling plan, [performance](docs/performance.md) with method and results, and [decision records](docs/adr) with the trade-offs.
 
 ## Run it locally
@@ -43,7 +45,7 @@ In a second terminal, add the demo data once:
 npm run db:seed
 ```
 
-Open http://localhost:5173 and choose **Fill in the demo account** (`demo@stockroom.app` / `stockroom-demo`), or create your own account.
+Open http://localhost:5173 and choose **Try the demo** for a private sandbox business, or **Fill in the local demo account** (`demo@stockroom.app` / `stockroom-demo`), or create your own account.
 
 To try a big import, generate a file for the demo business's stores and upload it on the **Imports** page:
 
@@ -96,6 +98,7 @@ packages/
   shared/            Zod schemas and types shared by the API and the web app
 docs/
   architecture.md    how it works, failure modes, scaling plan
+  deploy.md          free deployment: Render, Neon, Upstash, with budgets
   performance.md     load tests, query plans, trade-offs
   adr/               decision records
 scripts/
@@ -111,4 +114,4 @@ scripts/
 - [x] **Phase 2: bulk imports.** CSV and Excel files of up to 100,000 rows, processed in the background in chunks that resume after a crash, with live progress and a per-row problem report
 - [x] **Phase 3: operations.** Transfers between stores, low-stock alerts through a transactional outbox, signed webhooks with retries, staff accounts with invite links
 - [x] **Phase 4: performance.** Load tests and query plans; stock totals kept by triggers, keyset paging, capped counts and trigram search; Prometheus metrics. [Results](docs/performance.md)
-- [ ] **Phase 5: live demo.** Free deployment, with a sandbox business per visitor that is deleted after a day
+- [ ] **Phase 5: live demo.** ~~Sandbox business per visitor~~ (done), ~~free deployment config and guide~~ (done); next, the live link

@@ -28,13 +28,19 @@ const tenantId = () =>
     .notNull()
     .references(() => tenants.id, { onDelete: 'cascade' });
 
-export const tenants = pgTable('tenants', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  name: text('name').notNull(),
-  /** Last transfer number handed out, so each business numbers its transfers TR-0001, TR-0002, ... */
-  transferSequence: integer('transfer_sequence').notNull().default(0),
-  createdAt: createdAt(),
-});
+export const tenants = pgTable(
+  'tenants',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull(),
+    /** Last transfer number handed out, so each business numbers its transfers TR-0001, TR-0002, ... */
+    transferSequence: integer('transfer_sequence').notNull().default(0),
+    /** Set for a visitor's demo sandbox: when it's deleted. Null for real businesses. */
+    demoExpiresAt: timestamp('demo_expires_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index('tenants_demo_expires_idx').on(t.demoExpiresAt).where(sql`demo_expires_at is not null`)],
+);
 
 export const userRole = pgEnum('user_role', ['owner', 'staff']);
 

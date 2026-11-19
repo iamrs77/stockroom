@@ -143,7 +143,10 @@ export function invitesPublicRouter(deps: AppDeps) {
           .values({ tenantId: invite.tenantId, email: input.email, name: input.name, passwordHash, role: invite.role })
           .returning();
         await tx.update(invites).set({ acceptedBy: created!.id }).where(eq(invites.id, invite.id));
-        const [tenant] = await tx.select({ id: tenants.id, name: tenants.name }).from(tenants).where(eq(tenants.id, invite.tenantId));
+        const [tenant] = await tx
+          .select({ id: tenants.id, name: tenants.name, demoExpiresAt: tenants.demoExpiresAt })
+          .from(tenants)
+          .where(eq(tenants.id, invite.tenantId));
         return { ...created!, tenant: tenant! };
       } catch (err) {
         if (pgError(err)?.code === PG_UNIQUE_VIOLATION) throw new HttpError(409, 'email_taken', 'An account with this email already exists');
