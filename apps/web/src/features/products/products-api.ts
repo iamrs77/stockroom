@@ -34,6 +34,8 @@ export function useUpdateProduct(id: string) {
     onSuccess: (product) => {
       queryClient.setQueryData(queryKeys.products.detail(id), product);
       void queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
+      // A new reorder point can open or clear a low-stock alert.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.alerts });
     },
   });
 }
@@ -45,6 +47,7 @@ export function useArchiveProduct(id: string) {
     onSuccess: () => {
       queryClient.removeQueries({ queryKey: queryKeys.products.detail(id) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.alerts }); // an archived product's alert is cleared
     },
   });
 }

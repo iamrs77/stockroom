@@ -21,6 +21,7 @@ export function useImportEvents(id: string, enabled: boolean) {
         source.close();
         void queryClient.invalidateQueries({ queryKey: queryKeys.imports.detail(id) }); // fetch the problem list
         void queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.alerts }); // imported stock can open or clear alerts
       }
     };
     return () => source.close();

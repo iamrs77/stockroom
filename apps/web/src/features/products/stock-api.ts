@@ -27,6 +27,11 @@ export function useAdjustStock(productId: string) {
         body: input,
         headers: { 'Idempotency-Key': idempotencyKey },
       }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.products.all }),
+    // A change can open or clear a low-stock alert.
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.products.all }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.alerts }),
+      ]),
   });
 }
