@@ -180,7 +180,7 @@ sequenceDiagram
   C->>A: GET /imports/:id/events (SSE)
   A-->>C: current state from Postgres
   W->>Q: take job
-  W->>DB: claim (status = processing; one per tenant)
+  W->>DB: claim (status = processing, one per tenant)
   W->>W: pass 1: check header, count rows
   loop each chunk of 1,000 rows after the checkpoint
     W->>DB: BEGIN, move checkpoint (fails if another worker moved it)
