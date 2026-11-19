@@ -3,6 +3,7 @@ import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import EmbeddedPostgres from 'embedded-postgres';
+import { Redis } from 'ioredis';
 import type { TestProject } from 'vitest/node';
 import { createDb } from '../src/db/client';
 import { runMigrations } from '../src/db/migrate';
@@ -10,6 +11,7 @@ import { runMigrations } from '../src/db/migrate';
 declare module 'vitest' {
   export interface ProvidedContext {
     databaseUrl: string;
+    redisUrl: string;
   }
 }
 
@@ -53,6 +55,26 @@ export default async function setup(project: TestProject) {
   await runMigrations(db);
   await pool.end();
 
+  const redisUrl = process.env.TEST_REDIS_URL ?? 'redis://localhost:6379';
+  await checkRedis(redisUrl);
+
   project.provide('databaseUrl', databaseUrl);
+  project.provide('redisUrl', redisUrl);
   return stop;
+}
+
+/** Fails the run up front with instructions, rather than every import test timing out. */
+async function checkRedis(url: string) {
+  const redis = new Redis(url, { lazyConnect: true, maxRetriesPerRequest: 0, retryStrategy: () => null, connectTimeout: 3000 });
+  redis.on('error', () => {});
+  try {
+    await redis.connect();
+    await redis.ping();
+  } catch {
+    throw new Error(
+      `The tests need Redis at ${url}. Start it (on Windows: wsl -d Ubuntu -- redis-server --daemonize yes) or set TEST_REDIS_URL.`,
+    );
+  } finally {
+    redis.disconnect();
+  }
 }

@@ -25,4 +25,4 @@ Sign-in and sign-up are rate-limited per IP address. The limiter's counters live
 - Sign-out and access removal take effect immediately.
 - A stolen database dump contains no usable session tokens.
 - Every authenticated request costs one indexed query. If that ever matters, sessions can be cached in Redis with a short TTL.
-- **With more than one instance, the in-memory rate limiter undercounts** (each instance counts separately). The fix is a Redis store for the limiter, which is planned for when Redis arrives in phase 2.
+- **With more than one instance, the in-memory rate limiter undercounts** (each instance counts separately). Redis is available since phase 2, so the fix is a Redis store for the limiter. It isn't switched on yet: with a single instance it adds a network round trip to every sign-in for no benefit. Turning it on comes with running a second API instance.

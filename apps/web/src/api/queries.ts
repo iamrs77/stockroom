@@ -1,3 +1,9 @@
+import {
+  isImportFinished,
+  type ImportDetail,
+  type ImportSummary,
+  type ImportUploadResult,
+} from '@stockroom/shared';
 import type {
   CursorPage,
   LoginInput,
@@ -22,6 +28,7 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { api } from './client';
 
 export const keys = {
@@ -162,4 +169,65 @@ export function useAdjustStock(productId: string) {
       }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.products }),
   });
+}
+
+// ---- Imports ----
+
+const importKeys = {
+  all: ['imports'] as const,
+  list: ['imports', 'list'] as const,
+  detail: (id: string) => ['imports', 'detail', id] as const,
+};
+
+const anyActive = (items: ImportSummary[] | undefined) => items?.some((i) => !isImportFinished(i.status)) ?? false;
+
+export function useImports() {
+  return useQuery({
+    queryKey: importKeys.list,
+    queryFn: async () => (await api<{ items: ImportSummary[] }>('/imports')).items,
+    // Live updates arrive on the detail page; the list just checks in while anything is running.
+    refetchInterval: (query) => (anyActive(query.state.data) ? 3000 : false),
+  });
+}
+
+export function useImport(id: string) {
+  return useQuery({
+    queryKey: importKeys.detail(id),
+    queryFn: () => api<ImportDetail>(`/imports/${id}`),
+    // A slow safety net in case the live stream is interrupted.
+    refetchInterval: (query) => (query.state.data && !isImportFinished(query.state.data.status) ? 10_000 : false),
+  });
+}
+
+export function useUploadImport() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) =>
+      api<ImportUploadResult>('/imports', { method: 'POST', rawBody: file, query: { fileName: file.name } }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: importKeys.list }),
+  });
+}
+
+/**
+ * Follows an import's progress over server-sent events and writes each update into the query
+ * cache, so every component showing this import updates together.
+ */
+export function useImportEvents(id: string, enabled: boolean) {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!enabled) return;
+    const source = new EventSource(`/api/imports/${id}/events`);
+    source.onmessage = (event: MessageEvent<string>) => {
+      const summary = JSON.parse(event.data) as ImportSummary;
+      queryClient.setQueryData<ImportDetail>(importKeys.detail(id), (old) => (old ? { ...old, ...summary } : old));
+      queryClient.setQueryData<ImportSummary[]>(importKeys.list, (old) => old?.map((i) => (i.id === id ? summary : i)));
+      if (isImportFinished(summary.status)) {
+        // Close before the server does, or EventSource would reconnect.
+        source.close();
+        void queryClient.invalidateQueries({ queryKey: importKeys.detail(id) }); // fetch the problem list
+        void queryClient.invalidateQueries({ queryKey: keys.products });
+      }
+    };
+    return () => source.close();
+  }, [id, enabled, queryClient]);
 }

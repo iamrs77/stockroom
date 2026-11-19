@@ -21,11 +21,13 @@ export class ApiError extends Error {
 type RequestOptions = {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   body?: unknown;
+  /** Sent as-is instead of as JSON, e.g. a file upload. */
+  rawBody?: Blob;
   headers?: Record<string, string>;
   query?: Record<string, string | number | boolean | undefined>;
 };
 
-export async function api<T>(path: string, { method = 'GET', body, headers, query }: RequestOptions = {}): Promise<T> {
+export async function api<T>(path: string, { method = 'GET', body, rawBody, headers, query }: RequestOptions = {}): Promise<T> {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(query ?? {})) {
     if (value !== undefined && value !== '') search.set(key, String(value));
@@ -37,8 +39,12 @@ export async function api<T>(path: string, { method = 'GET', body, headers, quer
     res = await fetch(url, {
       method,
       credentials: 'same-origin',
-      headers: { ...(body !== undefined && { 'Content-Type': 'application/json' }), ...headers },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      headers: {
+        ...(body !== undefined && { 'Content-Type': 'application/json' }),
+        ...(rawBody && { 'Content-Type': 'application/octet-stream' }),
+        ...headers,
+      },
+      body: rawBody ?? (body !== undefined ? JSON.stringify(body) : undefined),
     });
   } catch {
     throw new ApiError(0, 'network_error', 'Could not reach the server. Check your connection and try again.');

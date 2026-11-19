@@ -1,13 +1,16 @@
 import { z } from 'zod';
 import { paginationQuerySchema } from './common';
 
+/** One SKU rule for the product form and for imports. */
+export const skuSchema = z
+  .string()
+  .trim()
+  .min(1, 'Enter a SKU')
+  .max(64, 'Use at most 64 characters')
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]*$/, 'Use letters, numbers, dots, dashes, slashes or underscores');
+
 const productFields = {
-  sku: z
-    .string()
-    .trim()
-    .min(1, 'Enter a SKU')
-    .max(64)
-    .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]*$/, 'Use letters, numbers, dots, dashes, slashes or underscores'),
+  sku: skuSchema,
   name: z.string().trim().min(1, 'Enter a name').max(200),
   category: z.string().trim().max(100).nullable(),
   priceCents: z.number().int().min(0, 'Price cannot be negative').max(100_000_000),

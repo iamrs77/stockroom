@@ -17,20 +17,20 @@ These shaped most of the decisions below.
 ```mermaid
 flowchart LR
   browser["Browser<br/>React app"]
-  subgraph service["Node service (one process on the free tier)"]
+  subgraph service["Node service (ROLE=all: one process on the free tier)"]
     web["Static web app"]
-    api["REST API<br/>Express"]
-    worker["Job worker<br/>BullMQ (planned)"]
+    api["REST API + SSE<br/>Express"]
+    worker["Import worker<br/>BullMQ"]
   end
   pg[("PostgreSQL<br/>source of truth")]
-  redis[("Redis<br/>queues, cache (planned)")]
+  redis[("Redis<br/>job queue, progress events")]
 
   browser -- "HTTPS, same origin" --> web
   browser -- "/api, session cookie" --> api
   api --> pg
-  api -. "enqueue (planned)" .-> redis
-  worker -. "consume (planned)" .-> redis
-  worker -.-> pg
+  api -- "enqueue, subscribe" --> redis
+  worker -- "jobs, publish progress" --> redis
+  worker --> pg
 ```
 
 The web app and the API are served from the same origin by the same process. That means:
@@ -39,15 +39,17 @@ The web app and the API are served from the same origin by the same process. Tha
 - the session cookie is first-party, so browser third-party-cookie blocking can't break it;
 - one free web service hosts everything.
 
+`ROLE` picks what a process runs: `all` (the default), `api` or `worker`. They're the same code. Splitting them lets imports scale separately from the API, with no code changes, because the queue is the only thing between them.
+
 ### Code layout
 
 ```
-apps/server     Express API (and, from phase 2, the job worker); serves the built web app in production
+apps/server     Express API and the import worker; serves the built web app in production
 apps/web        React single-page app
 packages/shared Zod schemas and types used by both, so validation rules can't drift apart
 ```
 
-The server is a **modular monolith**: `modules/auth`, `modules/products`, `modules/stock` and `modules/stores` each own their routes and queries, and talk to each other through plain functions rather than over the network. See [ADR 0001](adr/0001-modular-monolith.md).
+The server is a **modular monolith**: `modules/auth`, `modules/products`, `modules/stock`, `modules/stores` and `modules/imports` each own their routes and queries, and talk to each other through plain functions rather than over the network. See [ADR 0001](adr/0001-modular-monolith.md).
 
 ## Data model
 
@@ -79,6 +81,16 @@ erDiagram
     uuid id PK
     text sku "unique per tenant among active products"
     timestamptz archived_at
+  }
+  tenants ||--o{ imports : has
+  imports ||--o| import_files : "file while running"
+  imports ||--o{ import_errors : "skipped rows"
+  imports |o--o{ stock_movements : "made"
+  imports {
+    uuid id PK
+    enum status "one processing per tenant"
+    text file_hash "unique among active imports"
+    int processed_rows "checkpoint and fencing token"
   }
 ```
 
@@ -123,40 +135,48 @@ Why this shape:
 - **The constraint is the guard.** `CHECK (quantity >= 0)` is what stops overselling, not application code. If it fires, the transaction rolls back and nothing reaches the ledger.
 - **One Postgres detail matters here.** An upsert can't remove stock: Postgres checks constraints on the row an `INSERT` *proposes* before it notices the conflict, so inserting a negative quantity fails even when the existing row has plenty. Removals therefore use a plain `UPDATE`. The test suite caught this.
 
-### Bulk import (planned, phase 2)
+### Bulk import
 
-The centrepiece of the project: upload a spreadsheet of up to ~100k rows and have it applied in the background.
+Upload a CSV or Excel file of up to 100,000 rows and it's applied in the background, with live progress and a report of rows that were skipped. One row is one product: `sku, name, category, price, reorder_point, stock:<store code>…`. An empty cell means "leave as is". A `stock:` cell is the counted quantity in that store. The full design and its trade-offs are in [ADR 0006](adr/0006-bulk-import-pipeline.md).
 
 ```mermaid
 sequenceDiagram
-  participant C as Client
+  participant C as Browser
   participant A as API
   participant Q as Redis (BullMQ)
   participant W as Worker
   participant DB as PostgreSQL
 
-  C->>A: upload file
-  A->>DB: store file (bytea) + import row, keyed by file hash
-  A->>Q: enqueue import job
-  A-->>C: 202 Accepted, import id
+  C->>A: POST /imports (raw file body)
+  A->>DB: one transaction: imports row + file (bytea)
+  A->>Q: add job (job id = import id)
+  A-->>C: 202 Accepted
   C->>A: GET /imports/:id/events (SSE)
+  A-->>C: current state from Postgres
   W->>Q: take job
-  loop each chunk of ~1,000 rows
-    W->>DB: validate, upsert products, apply stock changes, save checkpoint
-    W->>Q: publish progress
-    Q-->>A: progress
+  W->>DB: claim (status = processing; one per tenant)
+  W->>W: pass 1: check header, count rows
+  loop each chunk of 1,000 rows after the checkpoint
+    W->>DB: BEGIN, move checkpoint (fails if another worker moved it)
+    W->>DB: upsert products, set stock, write ledger, save problems
+    W->>DB: COMMIT
+    W->>Q: publish summary
+    Q-->>A: summary (one subscription per API process)
     A-->>C: progress event
   end
-  W->>DB: mark done, keep per-row error report
+  W->>DB: completed, delete file
+  A-->>C: final event, stream closes
 ```
 
-Design points to build and test:
+What makes it hold up:
 
-- **Request path stays fast.** The API only stores the file and enqueues; parsing happens in the worker.
-- **Resumable.** Each chunk commits with a checkpoint, so a worker crash or a free instance going to sleep resumes from the last chunk instead of starting over.
-- **Idempotent.** Re-uploading the same file (same hash) returns the existing import.
-- **Fair.** A per-tenant concurrency limit stops one tenant's 100k-row file from starving everyone else's.
-- **Files in Postgres.** Uploads are stored in Postgres behind a small storage interface, because free tiers don't include object storage. See [ADR 0005](adr/0005-free-tier-hosting.md).
+- **The request path stays fast.** The API stores the file and queues it (about 280 ms for a 6 MB file). Parsing happens in the worker.
+- **Postgres records the work, the queue delivers it.** If queueing fails, a sweeper re-queues it later. Losing Redis delays imports but loses none.
+- **Each chunk commits with its checkpoint**, so a crash resumes exactly where it stopped. The checkpoint doubles as a fencing token, so two workers can't both apply the same chunk.
+- **Re-applying is harmless.** Stock cells are counts, not changes, so running rows again writes nothing.
+- **Bad rows are skipped, not fatal.** Every problem is reported with its spreadsheet row number and column, and the rest of the file still imports. Problems with the file itself, such as an unknown column or a store code that doesn't exist, fail the import before anything is written.
+- **Fair between businesses.** Each business gets one running import at a time; others wait their turn without blocking other businesses.
+- **The same file can't run twice at once.** A unique index on (tenant, file hash) among active imports turns a double-click into the same import.
 
 ## Multi-tenancy
 
@@ -191,8 +211,13 @@ Postgres row-level security would add a fourth layer that holds even if a query 
 | Server crashes mid-request after claiming a key | The key is left "in progress"; after 60 s a retry takes it over and runs the request |
 | Two sales race for the last unit | Row lock queues them; the second hits `CHECK (quantity >= 0)` and gets 409 `insufficient_stock` |
 | Two people create the same SKU at once | The unique index rejects the second; it gets 409 `sku_taken` |
-| Deploy or shutdown | `SIGTERM` stops new connections, lets in-flight requests finish (up to 10 s), then closes the pool |
-| Redis unavailable (planned) | Imports queue up and the API keeps serving reads and manual stock changes, which don't need Redis |
+| Deploy or shutdown | `SIGTERM` stops new connections and gives in-flight requests 5 s. The worker finishes its current chunk and puts the import back on the queue, so another worker resumes it straight away. Then the pool closes. |
+| Worker killed mid-import (crash, out of memory) | The job's lock expires and BullMQ hands it to a worker, which resumes from the last committed chunk. **Tested:** hard-killed at 32,000 of 100,000 rows; it resumed about a minute later, finished, and its 197,463 stock changes matched its ledger rows exactly. |
+| A stalled job reaches a second worker while the first still runs | The checkpoint acts as a fencing token: a chunk commits only if the checkpoint hasn't moved, so the loser stops before writing. Tested by running two workers on one import at once. |
+| Redis unavailable | Uploads still succeed (the import is saved in Postgres). The sweeper queues it once Redis is back. Live progress pauses, and the page falls back to polling. Everything except imports keeps working. |
+| Same file uploaded twice (double-click, retried request) | A unique index on (tenant, file hash) among active imports returns the existing import instead of starting another |
+| A row has bad data | That row is skipped and reported with its row number and column; the rest still import |
+| The file itself is wrong (no `sku` column, unknown store code, too many rows) | The import fails before writing anything, with a message saying what to fix |
 
 ## Capacity and scaling
 
@@ -204,19 +229,45 @@ These are estimates for planning. Measured numbers will replace them in phase 4.
 - A movement row plus its index entries is roughly **150 bytes**, so one tenant adds ~75 KB a day, or ~27 MB a year.
 - A free Postgres tier of ~0.5 GB therefore holds a **few dozen active demo tenants for a year**, which is plenty for a portfolio demo. Old demo tenants will be deleted by a scheduled job.
 
+### Measured so far
+
+On a laptop, with the production build and local Postgres and Redis:
+
+| What | Result |
+|---|---|
+| Upload a 100,000-row, 6 MB CSV | `202` in ~280 ms |
+| Import it (99,786 new products, 296,761 stock changes) | ~27 s, ~3,700 rows/s |
+| Import the same file again | 0 changes, ~6 s |
+| Recover from a hard kill at 32% | Resumed about a minute after restart, results exact |
+
+Product list, best of 3, with about 100,000 products in one business. These are the baseline that phase 4 will improve:
+
+| Query | Time |
+|---|---|
+| First page, sorted by name | 171 ms |
+| Page 2,000 (`OFFSET` 49,975) | 396 ms |
+| Sorted by total stock | 522 ms |
+| Low-stock filter | 435 ms |
+| Search for "honey" | 193 ms |
+
+Most of the cost is the `count(*)` for the page total, and summing stock per row for every product before sorting.
+
 ### What breaks first, and what to do about it
 
 | Pressure | First fix | Later |
 |---|---|---|
-| Product list sorts by total stock, computed per row | It reads `stock_levels` by primary key; fine at thousands of products per tenant | Keep a `total_stock` column on `products`, maintained in the stock transaction |
-| Deep pages of the product list (`OFFSET`) | Fine for UI page sizes | Keyset pagination, as stock history already uses |
-| Search with `ILIKE '%term%'` | Fine at thousands of rows per tenant | `pg_trgm` GIN index |
-| `stock_movements` grows forever | Index on `(tenant_id, product_id, id)` keeps history reads constant-time | Partition by month; archive old partitions |
-| More than one API instance | Sessions, idempotency and stock are already in Postgres, so instances are stateless | Move the rate-limit counters to Redis (they're per-process today) |
-| Imports slow down the API (planned) | Run the worker as its own process (`ROLE=worker`) | Scale workers separately from the API |
+| Product list sorts and filters by total stock, computed per row (522 ms at 100k) | Keep a `total_stock` column on `products`, maintained in the same transaction as stock changes, and index it | — |
+| Exact page totals cost a `count(*)` on every page | Show "about N" from the planner's estimate beyond a threshold | — |
+| Deep pages of the product list (`OFFSET`) | Keyset pagination, as stock history already uses | — |
+| Search with `ILIKE '%term%'` | `pg_trgm` GIN index | Postgres full-text search |
+| `stock_movements` grows forever (~300k rows from one import) | Index on `(tenant_id, product_id, id)` keeps history reads constant-time | Partition by month; archive old partitions |
+| More than one API instance | Sessions, idempotency, stock and imports are all in Postgres, so instances are stateless | Move the rate-limit counters to Redis (they're per-process today) |
+| Imports compete with the API for CPU | Run the worker as its own process (`ROLE=worker`) | Scale workers separately from the API |
 
 ## Observability
 
 - Structured JSON logs (pino) with a request id on every line. The id comes from `X-Request-Id` if the caller sent one, and is returned in the response, so a user-reported problem can be traced.
 - `/api/health` (process is up) and `/api/ready` (database reachable) for the host's health checks.
+- Every import keeps its own counters, timings and problem list, which is what the import page shows.
+- Redis outages are logged once when they start and once when they end, not on every retry.
 - Planned: Prometheus metrics (request latency histograms, queue depth, job duration) and request ids carried into background jobs.

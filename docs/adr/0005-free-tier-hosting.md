@@ -12,7 +12,7 @@ Typical free tiers in 2026 provide a single small web service that sleeps when i
 ## Decision
 
 - **One service** serves the web app, the API and (from phase 2) the job worker. See [ADR 0001](0001-modular-monolith.md).
-- **Postgres holds everything durable**: data, sessions, idempotency keys and, from phase 2, uploaded import files (as `bytea`, deleted once an import finishes). File storage sits behind a small interface, so S3-compatible storage can replace it if a free option is ever worth adding.
+- **Postgres holds everything durable**: data, sessions, idempotency keys and uploaded import files. Files are kept as `bytea` in an `import_files` table and deleted once the import ends. Moving them to S3-compatible storage would change two places: where the upload is saved, and where the worker reads it.
 - **Redis holds only things that can be rebuilt**: queues and caches. Losing it delays imports but loses no data.
 - **Migrations run on start-up**, because free hosts have no separate release step and there is one instance.
 - **The demo creates a sandbox business per visitor** (planned), seeded with sample data and deleted after 24 hours, so visitors can't vandalise each other's demo and storage stays bounded.

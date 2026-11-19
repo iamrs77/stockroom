@@ -9,6 +9,8 @@ import { keys } from './api/queries';
 import { AppLayout } from './components/AppLayout';
 import { RedirectIfSignedIn, RequireAuth } from './components/RequireAuth';
 import { LoginPage, RegisterPage } from './pages/AuthPages';
+import { ImportDetailPage } from './pages/ImportDetailPage';
+import { ImportsPage } from './pages/ImportsPage';
 import { NewProductPage } from './pages/NewProductPage';
 import { ProductDetailPage } from './pages/ProductDetailPage';
 import { ProductsPage } from './pages/ProductsPage';
@@ -59,6 +61,8 @@ const router = createBrowserRouter([
       { path: '/products/new', element: <NewProductPage /> },
       { path: '/products/:id', element: <ProductDetailPage /> },
       { path: '/stores', element: <StoresPage /> },
+      { path: '/imports', element: <ImportsPage /> },
+      { path: '/imports/:id', element: <ImportDetailPage /> },
     ],
   },
   { path: '*', element: <NotFoundPage /> },

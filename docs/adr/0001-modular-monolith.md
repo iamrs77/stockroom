@@ -11,9 +11,9 @@ Microservices would mean several deployables, network calls between them, and ei
 
 ## Decision
 
-One codebase and one deployable, organised by module (`auth`, `stores`, `products`, `stock`, and later `imports`). Modules call each other through plain functions and share one Postgres database.
+One codebase and one deployable, organised by module (`auth`, `stores`, `products`, `stock`, `imports`). Modules call each other through plain functions and share one Postgres database.
 
-The process will have roles, chosen with an environment variable:
+The process has roles, chosen with an environment variable:
 
 - `ROLE=all` (the default, used on the free tier) runs the HTTP API and the job worker in one process;
 - `ROLE=api` and `ROLE=worker` run them separately, so each can be scaled on its own when hosting allows.
@@ -23,5 +23,5 @@ The queue (Redis, via BullMQ) is the only thing connecting the API and the worke
 ## Consequences
 
 - One deploy, one log stream and real transactions. It fits the free tier.
-- In `ROLE=all`, a heavy import competes with API requests for CPU. Imports are processed in chunks and yield between them, and the split roles are available when that stops being enough.
+- In `ROLE=all`, a heavy import competes with API requests for CPU. Imports are processed in chunks of 1,000 rows and wait on the database between chunks, which gives requests a turn. The split roles are available when that stops being enough.
 - Module boundaries are enforced by convention and review, not by the network. A module reaching into another's tables is the main risk to watch for.

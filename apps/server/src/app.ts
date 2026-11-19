@@ -11,6 +11,9 @@ import { requireAuth } from './http/auth';
 import { errorHandler, notFoundHandler } from './http/errors';
 import type { Logger } from './logger';
 import { authRouter } from './modules/auth/routes';
+import type { ImportEvents } from './modules/imports/events';
+import type { ImportQueue } from './modules/imports/queue';
+import { importsRouter } from './modules/imports/routes';
 import { productsRouter } from './modules/products/routes';
 import { storesRouter } from './modules/stores/routes';
 
@@ -19,6 +22,7 @@ export type AppDeps = {
   db: Db;
   pool: ReturnType<typeof createDb>['pool'];
   logger: Logger;
+  imports: { queue: ImportQueue; events: ImportEvents };
   /** Folder of the built web app to serve, if any. */
   webDir?: string;
 };
@@ -67,6 +71,7 @@ export function createApp(deps: AppDeps) {
   api.use(requireAuth(deps));
   api.use('/stores', storesRouter(deps));
   api.use('/products', productsRouter(deps));
+  api.use('/imports', importsRouter(deps));
   api.use(notFoundHandler);
 
   app.use('/api', api);

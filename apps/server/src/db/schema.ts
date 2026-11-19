@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigserial,
   check,
+  customType,
   index,
   integer,
   jsonb,
@@ -151,6 +152,8 @@ export const stockMovements = pgTable(
     reason: stockReason('reason').notNull(),
     note: text('note'),
     userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+    /** The bulk import that made this change, if any. */
+    importId: uuid('import_id').references(() => imports.id, { onDelete: 'set null' }),
     createdAt: createdAt(),
   },
   (t) => [
@@ -174,4 +177,77 @@ export const idempotencyKeys = pgTable(
     createdAt: createdAt(),
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.key] }), index('idempotency_keys_created_idx').on(t.createdAt)],
+);
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType: () => 'bytea',
+});
+
+export const importStatus = pgEnum('import_status', ['queued', 'processing', 'completed', 'failed']);
+export const importFormat = pgEnum('import_format', ['csv', 'xlsx']);
+
+/**
+ * One row per uploaded spreadsheet. This table, not the queue, is the source of truth for an
+ * import: the queue only delivers work, and a sweeper re-queues anything the queue lost.
+ */
+export const imports = pgTable(
+  'imports',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+    fileName: text('file_name').notNull(),
+    fileSize: integer('file_size').notNull(),
+    /** SHA-256 of the file, used to spot the same file being uploaded twice. */
+    fileHash: text('file_hash').notNull(),
+    format: importFormat('format').notNull(),
+    status: importStatus('status').notNull().default('queued'),
+    totalRows: integer('total_rows'),
+    /** Checkpoint: data rows committed so far. Updated in the same transaction as each chunk's writes. */
+    processedRows: integer('processed_rows').notNull().default(0),
+    createdCount: integer('created_count').notNull().default(0),
+    updatedCount: integer('updated_count').notNull().default(0),
+    stockChangeCount: integer('stock_change_count').notNull().default(0),
+    errorCount: integer('error_count').notNull().default(0),
+    failureReason: text('failure_reason'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('imports_tenant_created_idx').on(t.tenantId, t.createdAt),
+    // The same file can't be queued twice at once (a double-click or a retried upload).
+    uniqueIndex('imports_active_file_key')
+      .on(t.tenantId, t.fileHash)
+      .where(sql`status in ('queued', 'processing')`),
+    // One running import per business, so a big file from one business can't hog the workers.
+    uniqueIndex('imports_one_processing_per_tenant_key').on(t.tenantId).where(sql`status = 'processing'`),
+    // Lets the sweeper find unfinished imports cheaply.
+    index('imports_unfinished_idx').on(t.updatedAt).where(sql`status in ('queued', 'processing')`),
+  ],
+);
+
+/** The uploaded file, kept in Postgres (free tiers have no object storage) and deleted once the import ends. */
+export const importFiles = pgTable('import_files', {
+  importId: uuid('import_id')
+    .primaryKey()
+    .references(() => imports.id, { onDelete: 'cascade' }),
+  content: bytea('content').notNull(),
+});
+
+/** Problems found in individual rows. Capped per import; error_count on imports has the full total. */
+export const importErrors = pgTable(
+  'import_errors',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    importId: uuid('import_id')
+      .notNull()
+      .references(() => imports.id, { onDelete: 'cascade' }),
+    rowNumber: integer('row_number').notNull(),
+    sku: text('sku'),
+    column: text('column'),
+    message: text('message').notNull(),
+  },
+  (t) => [index('import_errors_import_idx').on(t.importId, t.rowNumber)],
 );

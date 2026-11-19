@@ -1,4 +1,4 @@
-import { Boxes, LogOut, Package, Store } from 'lucide-react';
+import { Boxes, FileUp, LogOut, Package, Store } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router';
 import { useLogout, useMe } from '../api/queries';
 import { cx } from './ui';
@@ -6,6 +6,7 @@ import { cx } from './ui';
 const nav = [
   { to: '/products', label: 'Products', icon: Package },
   { to: '/stores', label: 'Stores', icon: Store },
+  { to: '/imports', label: 'Imports', icon: FileUp },
 ];
 
 export function Logo() {
