@@ -11,6 +11,12 @@ import { RedirectIfSignedIn, RequireAuth } from './components/RequireAuth';
 import { LoginPage, RegisterPage } from './pages/AuthPages';
 import { ImportDetailPage } from './pages/ImportDetailPage';
 import { ImportsPage } from './pages/ImportsPage';
+import { AcceptInvitePage } from './pages/AcceptInvitePage';
+import { AlertsPage } from './pages/AlertsPage';
+import { NewTransferPage } from './pages/NewTransferPage';
+import { SettingsPage } from './pages/SettingsPage';
+import { TransferDetailPage } from './pages/TransferDetailPage';
+import { TransfersPage } from './pages/TransfersPage';
 import { NewProductPage } from './pages/NewProductPage';
 import { ProductDetailPage } from './pages/ProductDetailPage';
 import { ProductsPage } from './pages/ProductsPage';
@@ -49,6 +55,7 @@ function NotFoundPage() {
 const router = createBrowserRouter([
   { path: '/login', element: <RedirectIfSignedIn><LoginPage /></RedirectIfSignedIn> },
   { path: '/register', element: <RedirectIfSignedIn><RegisterPage /></RedirectIfSignedIn> },
+  { path: '/invite/:token', element: <AcceptInvitePage /> },
   {
     element: (
       <RequireAuth>
@@ -63,6 +70,11 @@ const router = createBrowserRouter([
       { path: '/stores', element: <StoresPage /> },
       { path: '/imports', element: <ImportsPage /> },
       { path: '/imports/:id', element: <ImportDetailPage /> },
+      { path: '/transfers', element: <TransfersPage /> },
+      { path: '/transfers/new', element: <NewTransferPage /> },
+      { path: '/transfers/:id', element: <TransferDetailPage /> },
+      { path: '/alerts', element: <AlertsPage /> },
+      { path: '/settings', element: <SettingsPage /> },
     ],
   },
   { path: '*', element: <NotFoundPage /> },

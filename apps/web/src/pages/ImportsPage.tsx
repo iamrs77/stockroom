@@ -4,12 +4,14 @@ import { useRef, useState, type DragEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { useImports, useUploadImport } from '../api/queries';
 import { ImportProgressBar, ImportStatusBadge } from '../components/ImportStatus';
+import { useIsOwner } from '../components/AppLayout';
 import { Alert, Card, cx, PageHeader, Spinner } from '../components/ui';
 import { formatBytes, formatNumber, formatRelative } from '../lib/format';
 
 const ACCEPT = '.csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 export function ImportsPage() {
+  const isOwner = useIsOwner();
   return (
     <>
       <PageHeader
@@ -17,7 +19,11 @@ export function ImportsPage() {
         description="Add or update many products and stock counts at once from a spreadsheet."
       />
       <div className="mb-8 grid gap-6 lg:grid-cols-5">
-        <UploadCard />
+        {isOwner ? (
+          <UploadCard />
+        ) : (
+          <Card className="p-5 text-sm text-muted lg:col-span-3">Only owners can run imports. Here you can follow imports and their results.</Card>
+        )}
         <Card className="p-5 text-sm lg:col-span-2">
           <h2 className="mb-3 font-semibold">How it works</h2>
           <ul className="flex list-disc flex-col gap-2 pl-5 text-muted">

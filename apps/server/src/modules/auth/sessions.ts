@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Role, SessionUser } from '@stockroom/shared';
-import { and, eq, gt } from 'drizzle-orm';
+import { and, eq, gt, isNull } from 'drizzle-orm';
 import type { CookieOptions, Response } from 'express';
 import type { Db } from '../../db/client';
 import { sessions, tenants, users } from '../../db/schema';
@@ -33,7 +33,7 @@ export async function findSession(db: Db, token: string): Promise<AuthContext | 
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
     .innerJoin(tenants, eq(tenants.id, users.tenantId))
-    .where(and(eq(sessions.id, hashToken(token)), gt(sessions.expiresAt, new Date())));
+    .where(and(eq(sessions.id, hashToken(token)), gt(sessions.expiresAt, new Date()), isNull(users.deactivatedAt)));
   if (!row) return undefined;
   const { tenantId, tenantName, ...rest } = row;
   return { ...rest, role: rest.role as Role, tenant: { id: tenantId, name: tenantName } };

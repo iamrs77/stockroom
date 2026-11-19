@@ -2,7 +2,7 @@ import { IMPORT_MAX_BYTES, importStatuses, isImportFinished, type ImportSummary 
 import express, { Router } from 'express';
 import { z } from 'zod';
 import type { AppDeps } from '../../app';
-import { getAuth } from '../../http/auth';
+import { getAuth, requireRole } from '../../http/auth';
 import { HttpError } from '../../http/errors';
 import { parse, parseId } from '../../http/validate';
 import { MAX_STORED_ERRORS } from './process';
@@ -39,7 +39,7 @@ export function importsRouter(deps: AppDeps) {
   });
 
   // The file is the raw request body, so the upload needs no multipart parsing.
-  router.post('/', express.raw({ type: () => true, limit: IMPORT_MAX_BYTES }), async (req, res) => {
+  router.post('/', requireRole('owner'), express.raw({ type: () => true, limit: IMPORT_MAX_BYTES }), async (req, res) => {
     const auth = getAuth(req);
     const { fileName } = parse(uploadQuerySchema, req.query);
     const content: unknown = req.body;

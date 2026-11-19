@@ -20,17 +20,25 @@ flowchart LR
   subgraph service["Node service (ROLE=all: one process on the free tier)"]
     web["Static web app"]
     api["REST API + SSE<br/>Express"]
-    worker["Import worker<br/>BullMQ"]
+    subgraph workers["Background workers"]
+      imports["Import worker"]
+      relay["Outbox relay"]
+      hooks["Webhook sender"]
+    end
   end
-  pg[("PostgreSQL<br/>source of truth")]
-  redis[("Redis<br/>job queue, progress events")]
+  pg[("PostgreSQL<br/>source of truth<br/>+ outbox")]
+  redis[("Redis<br/>job queues, progress")]
+  ext["Business's webhook URL"]
 
   browser -- "HTTPS, same origin" --> web
   browser -- "/api, session cookie" --> api
   api --> pg
   api -- "enqueue, subscribe" --> redis
-  worker -- "jobs, publish progress" --> redis
-  worker --> pg
+  imports -- "jobs, progress" --> redis
+  imports --> pg
+  relay -- "SKIP LOCKED batches" --> pg
+  relay -- "delivery jobs" --> redis
+  hooks -- "signed POST, retries" --> ext
 ```
 
 The web app and the API are served from the same origin by the same process. That means:
@@ -39,17 +47,17 @@ The web app and the API are served from the same origin by the same process. Tha
 - the session cookie is first-party, so browser third-party-cookie blocking can't break it;
 - one free web service hosts everything.
 
-`ROLE` picks what a process runs: `all` (the default), `api` or `worker`. They're the same code. Splitting them lets imports scale separately from the API, with no code changes, because the queue is the only thing between them.
+`ROLE` picks what a process runs: `all` (the default), `api` or `worker`. They're the same code. Splitting them lets background work scale separately from the API, with no code changes: Postgres and Redis are the only things between them.
 
 ### Code layout
 
 ```
-apps/server     Express API and the import worker; serves the built web app in production
+apps/server     Express API and the background workers; serves the built web app in production
 apps/web        React single-page app
 packages/shared Zod schemas and types used by both, so validation rules can't drift apart
 ```
 
-The server is a **modular monolith**: `modules/auth`, `modules/products`, `modules/stock`, `modules/stores` and `modules/imports` each own their routes and queries, and talk to each other through plain functions rather than over the network. See [ADR 0001](adr/0001-modular-monolith.md).
+The server is a **modular monolith**: `auth`, `products`, `stock`, `stores`, `imports`, `transfers`, `alerts`, `events` (outbox and relay), `webhooks` and `team` each own their routes and queries under `modules/`, and talk to each other through plain functions rather than over the network. See [ADR 0001](adr/0001-modular-monolith.md).
 
 ## Data model
 
@@ -91,6 +99,23 @@ erDiagram
     enum status "one processing per tenant"
     text file_hash "unique among active imports"
     int processed_rows "checkpoint and fencing token"
+  }
+  tenants ||--o{ transfers : has
+  transfers ||--|{ transfer_lines : contains
+  transfers |o--o{ stock_movements : "made"
+  products ||--o| low_stock_alerts : "one open at a time"
+  tenants ||--o{ outbox_events : emits
+  outbox_events ||--o{ webhook_deliveries : "fanned out to"
+  webhook_endpoints ||--o{ webhook_deliveries : receives
+  tenants ||--o{ invites : issues
+  transfers {
+    int number "per tenant: TR-0001"
+    enum status "in_transit, received or cancelled"
+  }
+  outbox_events {
+    bigserial id PK
+    uuid event_id "what receivers see"
+    timestamptz published_at "null until relayed"
   }
 ```
 
@@ -178,6 +203,54 @@ What makes it hold up:
 - **Fair between businesses.** Each business gets one running import at a time; others wait their turn without blocking other businesses.
 - **The same file can't run twice at once.** A unique index on (tenant, file hash) among active imports turns a double-click into the same import.
 
+### Transfers
+
+Sending takes stock out of the source store straight away. Receiving adds what arrived to the destination and records any shortfall. Cancelling puts the stock back. Status changes are guarded `UPDATE`s, so pressing Receive twice adds the stock once. See [ADR 0008](adr/0008-transfers-and-lock-order.md).
+
+### Lock order
+
+Every writer takes row locks in the same order, so no two can deadlock:
+
+1. the transfer row (receive, cancel)
+2. products, by id
+3. stock levels, by (product, store)
+4. low-stock alerts
+
+Locking the product first also keeps the low-stock check correct when two stores sell the same product at once. A test forces that race and fails without the lock.
+
+### Events, alerts and webhooks
+
+```mermaid
+sequenceDiagram
+  participant API as API (any change)
+  participant DB as PostgreSQL
+  participant R as Outbox relay
+  participant Q as Redis (BullMQ)
+  participant W as Webhook sender
+  participant X as Business's endpoint
+
+  API->>DB: BEGIN, change stock, sync low-stock alerts
+  API->>DB: INSERT outbox_events (stock.low, transfer.sent, ...)
+  API->>DB: COMMIT
+  API-->>R: poke (in-process or via Redis)
+  R->>DB: BEGIN, SELECT ... FOR UPDATE SKIP LOCKED
+  R->>DB: INSERT webhook_deliveries per subscribed endpoint, mark published
+  R->>DB: COMMIT
+  R->>Q: enqueue delivery jobs
+  W->>Q: take job
+  W->>X: POST, signed with HMAC-SHA256
+  alt 2xx
+    W->>DB: delivered
+  else error or timeout
+    W->>DB: record attempt, retry with backoff (8 attempts, ~20 min)
+  end
+```
+
+- **Events are written in the change's own transaction**, so an event exists exactly when its change committed. See [ADR 0007](adr/0007-outbox-and-webhooks.md).
+- **Low-stock alerts compare state, not deltas.** After any stock change, one SQL statement opens an alert for each product at or below its reorder point and resolves alerts that recovered. It writes `stock.low` and `stock.restocked` events as it goes, and a partial unique index allows one open alert per product.
+- **Delivery is at least once and unordered.** Each request carries an event id for de-duplication and a Stripe-style signature.
+- **Webhooks can't reach private networks.** URLs are checked when saved and again at connection time.
+
 ## Multi-tenancy
 
 A business is a tenant. Isolation is enforced in three places:
@@ -192,6 +265,9 @@ Postgres row-level security would add a fourth layer that holds even if a query 
 
 | Concern | What's done |
 |---|---|
+| Roles | Owners do everything. Staff can view everything, change stock and handle transfers, but can't edit products, run imports or change stores, the team or webhooks. Enforced by the API; the web app only hides what the API would refuse. |
+| Team changes | Invite links are random 256-bit tokens, stored hashed, single-use (a guarded `UPDATE`), expiring after 7 days. Removing someone deactivates them and deletes their sessions, so access ends on their next request, and their name stays on the history they made. |
+| Webhooks | Signed with HMAC-SHA256 and a timestamp. Destination URLs must be public `https`, checked when saved and again at connection time, with redirects not followed (SSRF). |
 | Passwords | scrypt (built into Node, so there's no native module to compile on free hosts), with per-hash salt and cost settings stored alongside |
 | Sessions | Random 256-bit token in an `HttpOnly`, `SameSite=Lax`, `Secure` cookie. Only its SHA-256 hash is stored, so a database leak can't be replayed. Sign-out deletes it server-side. See [ADR 0004](adr/0004-server-side-sessions.md). |
 | CSRF | `SameSite=Lax` stops browsers sending the cookie on cross-site POSTs; the API only accepts JSON bodies |
@@ -215,6 +291,12 @@ Postgres row-level security would add a fourth layer that holds even if a query 
 | Worker killed mid-import (crash, out of memory) | The job's lock expires and BullMQ hands it to a worker, which resumes from the last committed chunk. **Tested:** hard-killed at 32,000 of 100,000 rows; it resumed about a minute later, finished, and its 197,463 stock changes matched its ledger rows exactly. |
 | A stalled job reaches a second worker while the first still runs | The checkpoint acts as a fencing token: a chunk commits only if the checkpoint hasn't moved, so the loser stops before writing. Tested by running two workers on one import at once. |
 | Redis unavailable | Uploads still succeed (the import is saved in Postgres). The sweeper queues it once Redis is back. Live progress pauses, and the page falls back to polling. Everything except imports keeps working. |
+| A change commits but the process dies before notifying anyone | Its outbox event was committed with it. The relay finds it on its next run (at most ~30 s later). |
+| A change rolls back | Its outbox event rolls back too, so nothing is sent for it. Tested. |
+| A webhook endpoint is down or slow | Each attempt is recorded. Retries back off over ~20 minutes, then the delivery is marked failed. Other endpoints aren't held up. |
+| Two relays run at once | `SKIP LOCKED` gives each a different batch. A delivery is unique per (endpoint, event), so nothing is sent twice. |
+| Two people receive the same transfer | The guarded status update lets one through; the other gets 409. Stock is added once. Tested with three at once. |
+| Two people use the same invite link | One account is created; the others get 410. Tested. |
 | Same file uploaded twice (double-click, retried request) | A unique index on (tenant, file hash) among active imports returns the existing import instead of starting another |
 | A row has bad data | That row is skipped and reported with its row number and column; the rest still import |
 | The file itself is wrong (no `sku` column, unknown store code, too many rows) | The import fails before writing anything, with a message saying what to fix |
@@ -270,4 +352,5 @@ Most of the cost is the `count(*)` for the page total, and summing stock per row
 - `/api/health` (process is up) and `/api/ready` (database reachable) for the host's health checks.
 - Every import keeps its own counters, timings and problem list, which is what the import page shows.
 - Redis outages are logged once when they start and once when they end, not on every retry.
+- Every webhook delivery records its attempts, last status code and last error, which the settings page shows.
 - Planned: Prometheus metrics (request latency histograms, queue depth, job duration) and request ids carried into background jobs.

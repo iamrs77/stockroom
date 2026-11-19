@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import type { Tx } from '../../db/client';
+import { syncLowStockAlerts } from '../events/outbox';
 import type { ImportRow, RowError } from './columns';
 
 export type ChunkContext = {
@@ -24,8 +25,8 @@ export type ChunkResult = {
  * size. Rows travel to Postgres as one JSON parameter and are unpacked with jsonb_to_recordset,
  * which avoids building queries with thousands of bind parameters.
  *
- * Locks are always taken in a fixed order (products by SKU, then stock by product and store), so
- * this can't deadlock with another writer that follows the same order.
+ * Locks follow the order every writer in the app uses: products by id, then stock levels by
+ * (product, store). That's why an import can't deadlock with a transfer or a manual change.
  */
 export async function applyChunk(tx: Tx, ctx: ChunkContext, rows: ImportRow[]): Promise<ChunkResult> {
   const result: ChunkResult = { created: 0, updated: 0, stockChanges: 0, errors: [], applied: 0 };
@@ -37,7 +38,7 @@ export async function applyChunk(tx: Tx, ctx: ChunkContext, rows: ImportRow[]): 
     select id, sku from products
     where tenant_id = ${ctx.tenantId} and archived_at is null
       and sku in (select jsonb_array_elements_text(${JSON.stringify(skus)}::jsonb))
-    order by sku
+    order by id
     for update`);
   const idsBySku = new Map(existing.rows.map((r) => [r.sku, r.id]));
 
@@ -88,6 +89,8 @@ export async function applyChunk(tx: Tx, ctx: ChunkContext, rows: ImportRow[]): 
   const applied = rows.filter((r) => idsBySku.has(r.sku));
   result.applied = applied.length;
   result.stockChanges = await setStock(tx, ctx, applied, idsBySku);
+  // Stock or reorder points may have changed: open or resolve low-stock alerts in the same transaction.
+  await syncLowStockAlerts(tx, ctx.tenantId, applied.map((r) => idsBySku.get(r.sku)!));
   return result;
 }
 

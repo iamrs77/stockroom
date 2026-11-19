@@ -3,3 +3,7 @@ export * from './auth';
 export * from './stores';
 export * from './products';
 export * from './imports';
+export * from './transfers';
+export * from './alerts';
+export * from './webhooks';
+export * from './team';

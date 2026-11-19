@@ -7,7 +7,7 @@ import {
 } from '@stockroom/shared';
 import { Router } from 'express';
 import type { AppDeps } from '../../app';
-import { getAuth } from '../../http/auth';
+import { getAuth, requireRole } from '../../http/auth';
 import { idempotent } from '../../http/idempotency';
 import { parse, parseId } from '../../http/validate';
 import { applyStockChange, listMovements } from '../stock/service';
@@ -22,7 +22,9 @@ export function productsRouter(deps: AppDeps) {
     res.json(await listProducts(db, tenant.id, parse(productListQuerySchema, req.query)));
   });
 
-  router.post('/', async (req, res) => {
+  const ownerOnly = requireRole('owner');
+
+  router.post('/', ownerOnly, async (req, res) => {
     const { tenant } = getAuth(req);
     const product = await createProduct(db, tenant.id, parse(productCreateSchema, req.body));
     res.status(201).json(product);
@@ -33,15 +35,18 @@ export function productsRouter(deps: AppDeps) {
     res.json(await getProduct(db, tenant.id, parseId(req.params.id, 'Product')));
   });
 
-  router.patch('/:id', async (req, res) => {
+  router.patch('/:id', ownerOnly, async (req, res) => {
     const { tenant } = getAuth(req);
     const id = parseId(req.params.id, 'Product');
-    res.json(await updateProduct(db, tenant.id, id, parse(productUpdateSchema, req.body)));
+    const product = await updateProduct(db, tenant.id, id, parse(productUpdateSchema, req.body));
+    deps.outbox.poke();
+    res.json(product);
   });
 
-  router.delete('/:id', async (req, res) => {
+  router.delete('/:id', ownerOnly, async (req, res) => {
     const { tenant } = getAuth(req);
     await archiveProduct(db, tenant.id, parseId(req.params.id, 'Product'));
+    deps.outbox.poke();
     res.status(204).end();
   });
 
@@ -64,6 +69,7 @@ export function productsRouter(deps: AppDeps) {
       note: input.note,
       userId: auth.id,
     });
+    deps.outbox.poke();
     res.status(201).json(result);
   });
 

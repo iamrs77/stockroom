@@ -72,6 +72,8 @@ export type StoreStock = {
 export type ProductDetail = ProductListItem & {
   createdAt: string;
   stock: StoreStock[];
+  /** Units sent between stores and not yet received. Not counted in any store's stock. */
+  inTransit: number;
 };
 
 /** Reasons a person can pick when changing stock by hand. */

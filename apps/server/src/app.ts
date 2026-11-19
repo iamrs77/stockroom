@@ -10,12 +10,16 @@ import type { createDb, Db } from './db/client';
 import { requireAuth } from './http/auth';
 import { errorHandler, notFoundHandler } from './http/errors';
 import type { Logger } from './logger';
+import { alertsRouter } from './modules/alerts/routes';
 import { authRouter } from './modules/auth/routes';
 import type { ImportEvents } from './modules/imports/events';
 import type { ImportQueue } from './modules/imports/queue';
 import { importsRouter } from './modules/imports/routes';
 import { productsRouter } from './modules/products/routes';
 import { storesRouter } from './modules/stores/routes';
+import { invitesPublicRouter, teamRouter } from './modules/team/routes';
+import { transfersRouter } from './modules/transfers/routes';
+import { webhooksRouter } from './modules/webhooks/routes';
 
 export type AppDeps = {
   config: Config;
@@ -23,6 +27,8 @@ export type AppDeps = {
   pool: ReturnType<typeof createDb>['pool'];
   logger: Logger;
   imports: { queue: ImportQueue; events: ImportEvents };
+  /** Call after committing a transaction that recorded outbox events, so they're sent promptly. */
+  outbox: { poke(): void };
   /** Folder of the built web app to serve, if any. */
   webDir?: string;
 };
@@ -68,10 +74,15 @@ export function createApp(deps: AppDeps) {
   });
 
   api.use('/auth', authRouter(deps));
+  api.use('/invites', invitesPublicRouter(deps));
   api.use(requireAuth(deps));
   api.use('/stores', storesRouter(deps));
   api.use('/products', productsRouter(deps));
   api.use('/imports', importsRouter(deps));
+  api.use('/transfers', transfersRouter(deps));
+  api.use('/alerts', alertsRouter(deps));
+  api.use('/webhooks', webhooksRouter(deps));
+  api.use('/team', teamRouter(deps));
   api.use(notFoundHandler);
 
   app.use('/api', api);

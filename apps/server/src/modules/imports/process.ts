@@ -3,6 +3,7 @@ import { and, count, eq, inArray, sql } from 'drizzle-orm';
 import { pgError, PG_UNIQUE_VIOLATION, type Db } from '../../db/client';
 import { importErrors, importFiles, imports, stores } from '../../db/schema';
 import type { Logger } from '../../logger';
+import { recordEvent } from '../events/outbox';
 import { applyChunk, type ChunkContext } from './apply-chunk';
 import { mapColumns, parseRow, type ImportRow, type RowError } from './columns';
 import { ImportFileError, isBlankRow, readRows, type SheetRow } from './read-rows';
@@ -28,6 +29,8 @@ export type ProcessOptions = {
   /** Checked between chunks. When aborted, processing stops cleanly at the last checkpoint. */
   signal?: AbortSignal;
   publish?: (summary: ImportSummary) => Promise<void> | void;
+  /** Tells the outbox relay that new events may have been committed (alerts, completion). */
+  pokeOutbox?: () => void;
   /** Test hook, called after each committed chunk. */
   afterChunk?: (processedRows: number) => Promise<void> | void;
 };
@@ -121,6 +124,7 @@ export async function processImport(db: Db, importId: string, options: ProcessOp
       storedErrors += result.stored;
       checkpoint = chunk.end;
       chunk = { rows: [], errors: [], errorRows: 0, end: checkpoint };
+      options.pokeOutbox?.();
       await publish();
       await options.afterChunk?.(checkpoint);
     };
@@ -167,12 +171,25 @@ export async function processImport(db: Db, importId: string, options: ProcessOp
     if (chunk.end > checkpoint) await commit();
 
     await db.transaction(async (tx) => {
-      await tx
+      const [done] = await tx
         .update(imports)
         .set({ status: 'completed', finishedAt: sql`now()`, updatedAt: sql`now()` })
-        .where(eq(imports.id, importId));
+        .where(eq(imports.id, importId))
+        .returning();
       await tx.delete(importFiles).where(eq(importFiles.importId, importId));
+      if (done) {
+        await recordEvent(tx, done.tenantId, 'import.completed', {
+          importId,
+          fileName: done.fileName,
+          rows: done.totalRows,
+          created: done.createdCount,
+          updated: done.updatedCount,
+          stockChanges: done.stockChangeCount,
+          skipped: done.errorCount,
+        });
+      }
     });
+    options.pokeOutbox?.();
     await publish();
     logger.info({ importId, rows: totalRows }, 'Import completed');
     return 'completed';
@@ -183,6 +200,7 @@ export async function processImport(db: Db, importId: string, options: ProcessOp
     }
     if (err instanceof ImportFileError) {
       await failImport(db, importId, err.message);
+      options.pokeOutbox?.();
       await publish();
       return 'failed';
     }
@@ -211,10 +229,12 @@ async function claim(db: Db, importId: string): Promise<Claimed | 'busy' | 'skip
 /** Marks an import failed with a reason a person can act on, and drops its file. */
 export async function failImport(db: Db, importId: string, reason: string) {
   await db.transaction(async (tx) => {
-    await tx
+    const [failed] = await tx
       .update(imports)
       .set({ status: 'failed', failureReason: reason, finishedAt: sql`now()`, updatedAt: sql`now()` })
-      .where(and(eq(imports.id, importId), inArray(imports.status, ['queued', 'processing'])));
+      .where(and(eq(imports.id, importId), inArray(imports.status, ['queued', 'processing'])))
+      .returning({ tenantId: imports.tenantId, fileName: imports.fileName });
     await tx.delete(importFiles).where(eq(importFiles.importId, importId));
+    if (failed) await recordEvent(tx, failed.tenantId, 'import.failed', { importId, fileName: failed.fileName, reason });
   });
 }

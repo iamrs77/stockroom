@@ -60,6 +60,8 @@ export type ImportWorkerOptions = {
   importQueue: ImportQueue;
   concurrency: number;
   chunkSize: number;
+  /** Tells the outbox relay about events committed by an import (alerts, completion). */
+  pokeOutbox?: () => void;
   /** How often to look for imports the queue lost, and how old they must be. */
   sweepEveryMs?: number;
   staleAfterMs?: number;
@@ -78,6 +80,7 @@ export function startImportWorker(options: ImportWorkerOptions) {
         logger,
         signal: stopping.signal,
         publish: (summary) => events.publish(summary),
+        pokeOutbox: options.pokeOutbox,
       });
       if (outcome === 'busy' || outcome === 'stopped') {
         // Put the job back without using up an attempt: "busy" waits for this business's other
@@ -105,6 +108,7 @@ export function startImportWorker(options: ImportWorkerOptions) {
         if ((await job.getState()) !== 'failed') return;
         // Record it, so the import doesn't sit in "processing" forever.
         await failImport(db, job.data.importId, 'The import kept failing because of a server problem. Try uploading the file again.');
+        options.pokeOutbox?.();
         const [row] = await db.select({ tenantId: imports.tenantId }).from(imports).where(eq(imports.id, job.data.importId));
         if (row) await events.publish(await getImportSummary(db, row.tenantId, job.data.importId));
       } catch (failErr) {

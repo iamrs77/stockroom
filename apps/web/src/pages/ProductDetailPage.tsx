@@ -3,6 +3,7 @@ import { ArrowLeft, Pencil, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useArchiveProduct, useMovements, useProduct, useUpdateProduct } from '../api/queries';
+import { useIsOwner } from '../components/AppLayout';
 import { ProductForm } from '../components/ProductForm';
 import { StockAdjustForm } from '../components/StockAdjustForm';
 import { Alert, Button, Card, cx, PageHeader, Spinner, StockBadge } from '../components/ui';
@@ -25,6 +26,7 @@ export function ProductDetailPage() {
   const update = useUpdateProduct(id);
   const archive = useArchiveProduct(id);
   const [editing, setEditing] = useState(false);
+  const isOwner = useIsOwner();
   const [adjustingStore, setAdjustingStore] = useState<string | null>(null);
 
   if (isPending) return <Spinner label="Loading product" />;
@@ -60,7 +62,7 @@ export function ProductDetailPage() {
           </span>
         }
         actions={
-          !editing && (
+          isOwner && !editing && (
             <>
               <Button variant="secondary" onClick={() => setEditing(true)}>
                 <Pencil className="size-4" aria-hidden />
@@ -107,6 +109,7 @@ export function ProductDetailPage() {
               <span className="text-muted">
                 Total <span className="font-semibold text-ink tabular-nums">{formatNumber(product.totalStock)}</span>
                 {product.reorderPoint > 0 && <> · reorder at {formatNumber(product.reorderPoint)}</>}
+                {product.inTransit > 0 && <> · {formatNumber(product.inTransit)} in transit</>}
               </span>
             </div>
           </div>

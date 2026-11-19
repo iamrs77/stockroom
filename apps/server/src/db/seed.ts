@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm';
 import { loadConfig } from '../config';
 import { hashPassword } from '../modules/auth/passwords';
 import { createDb, waitForDatabase } from './client';
+import { syncLowStockAlerts } from '../modules/events/outbox';
 import { runMigrations } from './migrate';
 import { products, stockLevels, stockMovements, stores, tenants, users } from './schema';
 
@@ -146,6 +147,8 @@ await db.transaction(async (tx) => {
   // Insert in batches to stay well under Postgres's 65,535 bind-parameter limit.
   for (let i = 0; i < levels.length; i += 1000) await tx.insert(stockLevels).values(levels.slice(i, i + 1000));
   for (let i = 0; i < movements.length; i += 1000) await tx.insert(stockMovements).values(movements.slice(i, i + 1000));
+  // Open alerts for products that start out low, the same way any stock change would.
+  await syncLowStockAlerts(tx, tenant.id, createdProducts.map((p) => p.id));
 
   console.log(
     `Seeded "${tenant.name}": ${createdStores.length} stores, ${createdProducts.length} products, ${levels.length} stock levels`,

@@ -17,6 +17,12 @@ const envSchema = z.object({
   REDIS_PREFIX: z.string().min(1).default('stockroom'),
   IMPORT_CONCURRENCY: z.coerce.number().int().positive().default(2),
   IMPORT_CHUNK_SIZE: z.coerce.number().int().positive().default(1000),
+  /** Lets webhooks reach localhost and private networks. Never in production; defaults on in development. */
+  WEBHOOKS_ALLOW_PRIVATE: z.stringbool().optional(),
+  WEBHOOK_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+  WEBHOOK_RETRY_DELAY_MS: z.coerce.number().int().positive().default(10_000),
+  /** How often the outbox relay checks for events it wasn't told about (it's normally poked). */
+  OUTBOX_POLL_MS: z.coerce.number().int().positive().default(30_000),
 });
 
 export type Config = {
@@ -35,6 +41,10 @@ export type Config = {
   redisPrefix: string;
   importConcurrency: number;
   importChunkSize: number;
+  webhooksAllowPrivate: boolean;
+  webhookTimeoutMs: number;
+  webhookRetryDelayMs: number;
+  outboxPollMs: number;
 };
 
 const LOCAL_DATABASE_URL = 'postgres://postgres:postgres@localhost:5433/stockroom';
@@ -65,6 +75,9 @@ export function loadConfig(): Config {
   if (isProduction && !env.REDIS_URL) {
     throw new Error('REDIS_URL must be set in production');
   }
+  if (isProduction && env.WEBHOOKS_ALLOW_PRIVATE) {
+    throw new Error('WEBHOOKS_ALLOW_PRIVATE must not be set in production');
+  }
   return {
     env: env.NODE_ENV,
     isProduction,
@@ -80,5 +93,9 @@ export function loadConfig(): Config {
     redisPrefix: env.REDIS_PREFIX,
     importConcurrency: env.IMPORT_CONCURRENCY,
     importChunkSize: env.IMPORT_CHUNK_SIZE,
+    webhooksAllowPrivate: env.WEBHOOKS_ALLOW_PRIVATE === undefined ? env.NODE_ENV === 'development' : env.WEBHOOKS_ALLOW_PRIVATE,
+    webhookTimeoutMs: env.WEBHOOK_TIMEOUT_MS,
+    webhookRetryDelayMs: env.WEBHOOK_RETRY_DELAY_MS,
+    outboxPollMs: env.OUTBOX_POLL_MS,
   };
 }

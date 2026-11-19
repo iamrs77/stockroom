@@ -1,5 +1,5 @@
 import { loginSchema, registerSchema } from '@stockroom/shared';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import type { AppDeps } from '../../app';
@@ -75,7 +75,8 @@ export function authRouter(deps: AppDeps) {
       })
       .from(users)
       .innerJoin(tenants, eq(tenants.id, users.tenantId))
-      .where(eq(users.email, input.email));
+      // Someone removed from the team gets the same answer as a wrong password.
+      .where(and(eq(users.email, input.email), isNull(users.deactivatedAt)));
 
     // Same work and same error whether or not the email exists.
     const valid = await verifyPassword(input.password, user?.passwordHash ?? (await getDummyHash()));

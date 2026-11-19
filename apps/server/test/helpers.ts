@@ -7,7 +7,9 @@ import { createApp } from '../src/app';
 import type { Config } from '../src/config';
 import { createDb } from '../src/db/client';
 import { ImportEvents } from '../src/modules/imports/events';
+import { createOutboxPoke, startOutboxRelay } from '../src/modules/events/relay';
 import { createImportQueue, startImportWorker } from '../src/modules/imports/queue';
+import { createWebhookQueue, startWebhookWorker } from '../src/modules/webhooks/delivery';
 import { createRedis, deleteKeysWithPrefix } from '../src/redis';
 
 export const silentLogger = pino({ level: 'silent' });
@@ -15,9 +17,11 @@ export const silentLogger = pino({ level: 'silent' });
 type Options = Partial<Config> & {
   /** Also run an import worker in this test file. */
   worker?: boolean;
+  /** Also run the outbox relay and webhook worker. Use in one test file only: the database is shared. */
+  webhooks?: boolean;
 };
 
-export function setupTestApp({ worker: withWorker = false, ...overrides }: Options = {}) {
+export function setupTestApp({ worker: withWorker = false, webhooks: withWebhooks = false, ...overrides }: Options = {}) {
   const { db, pool } = createDb(inject('databaseUrl'), 20);
   const redisUrl = inject('redisUrl');
   // Each test file gets its own Redis key prefix, so files never share queues or events.
@@ -37,6 +41,10 @@ export function setupTestApp({ worker: withWorker = false, ...overrides }: Optio
     redisPrefix: prefix,
     importConcurrency: 2,
     importChunkSize: 1000,
+    webhooksAllowPrivate: true, // test receivers listen on localhost
+    webhookTimeoutMs: 2000,
+    webhookRetryDelayMs: 100,
+    outboxPollMs: 200,
     ...overrides,
   };
 
@@ -44,6 +52,22 @@ export function setupTestApp({ worker: withWorker = false, ...overrides }: Optio
   const subscriber = createRedis(redisUrl, 'test-subscriber', silentLogger);
   const events = new ImportEvents({ prefix, logger: silentLogger, publisher: redis, subscriber });
   const importQueue = createImportQueue({ connection: redis, prefix, logger: silentLogger });
+  const webhookQueue = createWebhookQueue({ connection: redis, prefix, logger: silentLogger, retryDelayMs: config.webhookRetryDelayMs });
+  const relay = withWebhooks
+    ? startOutboxRelay({ db, logger: silentLogger, webhookQueue, pollEveryMs: config.outboxPollMs })
+    : undefined;
+  const outbox = createOutboxPoke({ prefix, publisher: redis, localDrain: relay?.drain });
+  const webhookWorker = withWebhooks
+    ? startWebhookWorker({
+        db,
+        redisUrl,
+        prefix,
+        logger: silentLogger,
+        webhookQueue,
+        allowPrivate: config.webhooksAllowPrivate,
+        timeoutMs: config.webhookTimeoutMs,
+      })
+    : undefined;
   const worker = withWorker
     ? startImportWorker({
         db,
@@ -54,20 +78,24 @@ export function setupTestApp({ worker: withWorker = false, ...overrides }: Optio
         importQueue,
         concurrency: config.importConcurrency,
         chunkSize: config.importChunkSize,
+        pokeOutbox: outbox.poke,
       })
     : undefined;
 
-  const app = createApp({ config, db, pool, logger: silentLogger, imports: { queue: importQueue, events } });
+  const app = createApp({ config, db, pool, logger: silentLogger, imports: { queue: importQueue, events }, outbox });
 
   afterAll(async () => {
     await worker?.close();
+    await webhookWorker?.close();
+    await relay?.close();
     await importQueue.close();
+    await webhookQueue.close();
     await deleteKeysWithPrefix(redis, prefix);
     subscriber.disconnect();
     redis.disconnect();
     await pool.end();
   });
-  return { app, db, pool, importQueue, events, worker, prefix };
+  return { app, db, pool, importQueue, webhookQueue, events, worker, relay, prefix };
 }
 
 type App = ReturnType<typeof setupTestApp>['app'];

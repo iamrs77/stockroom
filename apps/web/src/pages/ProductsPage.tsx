@@ -3,6 +3,7 @@ import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Plus, Search } from 'luc
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { useProducts } from '../api/queries';
+import { useIsOwner } from '../components/AppLayout';
 import { Alert, Button, Card, cx, Input, PageHeader, Spinner, StockBadge } from '../components/ui';
 import { formatMoney, formatNumber, formatRelative, stockStatus } from '../lib/format';
 
@@ -45,6 +46,7 @@ export function ProductsPage() {
   const [list, setList] = useListParams();
   const [search, setSearch] = useState(list.q);
   const navigate = useNavigate();
+  const isOwner = useIsOwner();
 
   // Wait for a pause in typing before searching. Only the typed text should restart the timer.
   useEffect(() => {
@@ -75,6 +77,7 @@ export function ProductsPage() {
         title="Products"
         description={data ? `${formatNumber(data.total)} ${list.lowStock ? 'low on stock' : 'products'}` : undefined}
         actions={
+          isOwner && (
           <Link
             to="/products/new"
             className="inline-flex h-10 items-center gap-2 rounded-md bg-accent px-4 text-sm font-medium text-accent-ink hover:opacity-90"
@@ -82,6 +85,7 @@ export function ProductsPage() {
             <Plus className="size-4" aria-hidden />
             New product
           </Link>
+          )
         }
       />
 

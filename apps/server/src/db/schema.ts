@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigserial,
+  boolean,
   check,
   customType,
   index,
@@ -30,6 +31,8 @@ const tenantId = () =>
 export const tenants = pgTable('tenants', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull(),
+  /** Last transfer number handed out, so each business numbers its transfers TR-0001, TR-0002, ... */
+  transferSequence: integer('transfer_sequence').notNull().default(0),
   createdAt: createdAt(),
 });
 
@@ -45,6 +48,8 @@ export const users = pgTable(
     name: text('name').notNull(),
     passwordHash: text('password_hash').notNull(),
     role: userRole('role').notNull().default('staff'),
+    /** Removed from the team. Kept, not deleted, so their name stays on the history they made. */
+    deactivatedAt: timestamp('deactivated_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex('users_email_key').on(t.email), index('users_tenant_idx').on(t.tenantId)],
@@ -154,6 +159,8 @@ export const stockMovements = pgTable(
     userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
     /** The bulk import that made this change, if any. */
     importId: uuid('import_id').references(() => imports.id, { onDelete: 'set null' }),
+    /** The transfer that made this change, if any. */
+    transferId: uuid('transfer_id').references(() => transfers.id, { onDelete: 'set null' }),
     createdAt: createdAt(),
   },
   (t) => [
@@ -250,4 +257,183 @@ export const importErrors = pgTable(
     message: text('message').notNull(),
   },
   (t) => [index('import_errors_import_idx').on(t.importId, t.rowNumber)],
+);
+
+// ---- Transfers ----
+
+export const transferStatus = pgEnum('transfer_status', ['in_transit', 'received', 'cancelled']);
+
+/**
+ * Stock moving between two stores. Sending takes it out of the source store; receiving adds what
+ * actually arrived to the destination. The status only moves forward, from in_transit to received
+ * or cancelled, and every move is a guarded UPDATE, so two people can't receive the same transfer.
+ */
+export const transfers = pgTable(
+  'transfers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    number: integer('number').notNull(),
+    fromStoreId: uuid('from_store_id')
+      .notNull()
+      .references(() => stores.id, { onDelete: 'cascade' }),
+    toStoreId: uuid('to_store_id')
+      .notNull()
+      .references(() => stores.id, { onDelete: 'cascade' }),
+    status: transferStatus('status').notNull().default('in_transit'),
+    note: text('note'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    receivedBy: uuid('received_by').references(() => users.id, { onDelete: 'set null' }),
+    cancelledBy: uuid('cancelled_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    receivedAt: timestamp('received_at', { withTimezone: true }),
+    cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('transfers_tenant_number_key').on(t.tenantId, t.number),
+    index('transfers_tenant_created_idx').on(t.tenantId, t.createdAt),
+    check('transfers_different_stores', sql`${t.fromStoreId} <> ${t.toStoreId}`),
+  ],
+);
+
+export const transferLines = pgTable(
+  'transfer_lines',
+  {
+    transferId: uuid('transfer_id')
+      .notNull()
+      .references(() => transfers.id, { onDelete: 'cascade' }),
+    productId: uuid('product_id')
+      .notNull()
+      .references(() => products.id, { onDelete: 'cascade' }),
+    quantity: integer('quantity').notNull(),
+    /** What actually arrived. Null until the transfer is received. */
+    receivedQuantity: integer('received_quantity'),
+  },
+  (t) => [
+    primaryKey({ columns: [t.transferId, t.productId] }),
+    index('transfer_lines_product_idx').on(t.productId),
+    check('transfer_lines_quantity_positive', sql`${t.quantity} > 0`),
+    check(
+      'transfer_lines_received_in_range',
+      sql`${t.receivedQuantity} is null or (${t.receivedQuantity} >= 0 and ${t.receivedQuantity} <= ${t.quantity})`,
+    ),
+  ],
+);
+
+// ---- Low-stock alerts and the outbox ----
+
+/**
+ * A product at or below its reorder point. At most one open alert per product (partial unique
+ * index), so a product hovering around its reorder point can't raise a flood of alerts.
+ */
+export const lowStockAlerts = pgTable(
+  'low_stock_alerts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    productId: uuid('product_id')
+      .notNull()
+      .references(() => products.id, { onDelete: 'cascade' }),
+    stockAtOpen: integer('stock_at_open').notNull(),
+    reorderPointAtOpen: integer('reorder_point_at_open').notNull(),
+    openedAt: timestamp('opened_at', { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    stockAtResolve: integer('stock_at_resolve'),
+  },
+  (t) => [
+    uniqueIndex('low_stock_alerts_one_open_key').on(t.productId).where(sql`resolved_at is null`),
+    index('low_stock_alerts_tenant_open_idx').on(t.tenantId, t.openedAt).where(sql`resolved_at is null`),
+  ],
+);
+
+/**
+ * Transactional outbox. Events are written in the same transaction as the change they describe,
+ * so an event exists exactly when its change committed. A relay delivers them afterwards.
+ */
+export const outboxEvents = pgTable(
+  'outbox_events',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    /** The id receivers see, and use to ignore an event delivered twice. */
+    eventId: uuid('event_id').notNull().defaultRandom().unique(),
+    tenantId: tenantId(),
+    type: text('type').notNull(),
+    payload: jsonb('payload').notNull(),
+    createdAt: createdAt(),
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('outbox_events_unpublished_idx').on(t.id).where(sql`published_at is null`),
+    index('outbox_events_published_idx').on(t.publishedAt),
+  ],
+);
+
+// ---- Webhooks ----
+
+export const webhookEndpoints = pgTable(
+  'webhook_endpoints',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    url: text('url').notNull(),
+    description: text('description'),
+    /** Signing secret. Stored as-is because every delivery has to be signed with it. */
+    secret: text('secret').notNull(),
+    eventTypes: text('event_types').array().notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('webhook_endpoints_tenant_idx').on(t.tenantId)],
+);
+
+export const webhookDeliveryStatus = pgEnum('webhook_delivery_status', ['pending', 'succeeded', 'failed']);
+
+/** One row per (endpoint, event). The unique key makes fanning an event out twice harmless. */
+export const webhookDeliveries = pgTable(
+  'webhook_deliveries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    endpointId: uuid('endpoint_id')
+      .notNull()
+      .references(() => webhookEndpoints.id, { onDelete: 'cascade' }),
+    eventId: uuid('event_id')
+      .notNull()
+      .references(() => outboxEvents.eventId, { onDelete: 'cascade' }),
+    eventType: text('event_type').notNull(),
+    status: webhookDeliveryStatus('status').notNull().default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    lastStatusCode: integer('last_status_code'),
+    lastError: text('last_error'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('webhook_deliveries_endpoint_event_key').on(t.endpointId, t.eventId),
+    index('webhook_deliveries_endpoint_created_idx').on(t.endpointId, t.createdAt),
+    index('webhook_deliveries_pending_idx').on(t.updatedAt).where(sql`status = 'pending'`),
+  ],
+);
+
+// ---- Team ----
+
+/** An invitation link. Only a hash of its token is stored; the link itself is shown once. */
+export const invites = pgTable(
+  'invites',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    tokenHash: text('token_hash').notNull().unique(),
+    role: userRole('role').notNull().default('staff'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+    acceptedBy: uuid('accepted_by').references(() => users.id, { onDelete: 'set null' }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (t) => [index('invites_tenant_idx').on(t.tenantId)],
 );

@@ -1,9 +1,10 @@
 import type { productCreateSchema, productListQuerySchema, productUpdateSchema } from '@stockroom/shared';
 import { and, asc, desc, eq, ilike, isNull, or, sql, type SQL } from 'drizzle-orm';
 import type { z } from 'zod';
-import { pgError, PG_UNIQUE_VIOLATION, type Executor } from '../../db/client';
-import { products, stockLevels, stores } from '../../db/schema';
+import { pgError, PG_UNIQUE_VIOLATION, type Db, type Executor } from '../../db/client';
+import { products, stockLevels, stores, transferLines, transfers } from '../../db/schema';
 import { HttpError, notFound } from '../../http/errors';
+import { syncLowStockAlerts } from '../events/outbox';
 
 /** Total quantity across all stores. Reads stock_levels by its primary key (product_id, store_id). */
 const totalStock = sql<number>`coalesce((select sum(sl.quantity) from ${stockLevels} sl where sl.product_id = ${products.id}), 0)::int`;
@@ -80,7 +81,13 @@ export async function getProduct(db: Executor, tenantId: string, productId: stri
     .where(eq(stores.tenantId, tenantId))
     .orderBy(asc(stores.name));
 
-  return { ...product, stock };
+  const [transit] = await db
+    .select({ units: sql<number>`coalesce(sum(${transferLines.quantity}), 0)::int` })
+    .from(transferLines)
+    .innerJoin(transfers, eq(transfers.id, transferLines.transferId))
+    .where(and(eq(transferLines.productId, productId), eq(transfers.tenantId, tenantId), eq(transfers.status, 'in_transit')));
+
+  return { ...product, stock, inTransit: transit?.units ?? 0 };
 }
 
 function rethrowSkuTaken(err: unknown, sku: string | undefined): never {
@@ -106,7 +113,7 @@ export async function createProduct(db: Executor, tenantId: string, input: z.out
 }
 
 export async function updateProduct(
-  db: Executor,
+  db: Db,
   tenantId: string,
   productId: string,
   input: z.output<typeof productUpdateSchema>,
@@ -114,25 +121,32 @@ export async function updateProduct(
   const changes = { ...input };
   if (changes.category !== undefined) changes.category = changes.category || null;
 
-  let updated: { id: string } | undefined;
-  try {
-    [updated] = await db
-      .update(products)
-      .set({ ...changes, updatedAt: sql`now()` })
-      .where(activeProduct(tenantId, productId))
-      .returning({ id: products.id });
-  } catch (err) {
-    rethrowSkuTaken(err, input.sku);
-  }
-  if (!updated) throw notFound('Product');
+  await db.transaction(async (tx) => {
+    let updated: { id: string } | undefined;
+    try {
+      [updated] = await tx
+        .update(products)
+        .set({ ...changes, updatedAt: sql`now()` })
+        .where(activeProduct(tenantId, productId))
+        .returning({ id: products.id });
+    } catch (err) {
+      rethrowSkuTaken(err, input.sku);
+    }
+    if (!updated) throw notFound('Product');
+    // A new reorder point can open or resolve a low-stock alert without any stock moving.
+    if (input.reorderPoint !== undefined) await syncLowStockAlerts(tx, tenantId, [productId]);
+  });
   return getProduct(db, tenantId, productId);
 }
 
-export async function archiveProduct(db: Executor, tenantId: string, productId: string) {
-  const [archived] = await db
-    .update(products)
-    .set({ archivedAt: sql`now()`, updatedAt: sql`now()` })
-    .where(activeProduct(tenantId, productId))
-    .returning({ id: products.id });
-  if (!archived) throw notFound('Product');
+export async function archiveProduct(db: Db, tenantId: string, productId: string) {
+  await db.transaction(async (tx) => {
+    const [archived] = await tx
+      .update(products)
+      .set({ archivedAt: sql`now()`, updatedAt: sql`now()` })
+      .where(activeProduct(tenantId, productId))
+      .returning({ id: products.id });
+    if (!archived) throw notFound('Product');
+    await syncLowStockAlerts(tx, tenantId, [productId]); // an archived product's alert is resolved
+  });
 }

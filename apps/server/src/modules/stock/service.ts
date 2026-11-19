@@ -4,6 +4,7 @@ import type { z } from 'zod';
 import { pgError, PG_CHECK_VIOLATION, type Db, type Executor } from '../../db/client';
 import { products, stockLevels, stockMovements, stores, users } from '../../db/schema';
 import { HttpError, notFound } from '../../http/errors';
+import { syncLowStockAlerts } from '../events/outbox';
 import { activeProduct } from '../products/service';
 
 export type StockChange = {
@@ -34,11 +35,17 @@ const insufficientStock = () =>
 /**
  * Applies one stock change and records it in the ledger, in a single transaction.
  *
- * The write locks the (product, store) row, so concurrent changes to the same stock queue up
- * behind each other instead of overwriting each other. The quantity >= 0 check constraint rejects
- * any change that would take stock below zero, so there is no read-then-write race to get wrong.
+ * The product row is locked first (the global lock order is products, then stock levels), so
+ * concurrent changes to the same product queue up instead of overwriting each other, and the
+ * low-stock check at the end sees every committed change. The quantity >= 0 check constraint
+ * rejects any change that would take stock below zero, so there's no read-then-write race to get wrong.
  */
-export async function applyStockChange(db: Db, change: StockChange) {
+export async function applyStockChange(
+  db: Db,
+  change: StockChange,
+  /** Test hook: runs inside the transaction, after the low-stock check and before the commit. */
+  hooks: { beforeCommit?: () => Promise<void> } = {},
+) {
   return db.transaction(async (tx) => {
     await assertBelongsToTenant(tx, change);
 
@@ -74,6 +81,8 @@ export async function applyStockChange(db: Db, change: StockChange) {
       .leftJoin(users, eq(users.id, stockMovements.userId))
       .where(eq(stockMovements.id, inserted.id));
 
+    await syncLowStockAlerts(tx, change.tenantId, [change.productId]);
+    await hooks.beforeCommit?.();
     return { quantity, movement };
   });
 }
@@ -109,7 +118,8 @@ async function assertBelongsToTenant(tx: Executor, change: StockChange) {
   const [product] = await tx
     .select({ id: products.id })
     .from(products)
-    .where(activeProduct(change.tenantId, change.productId));
+    .where(activeProduct(change.tenantId, change.productId))
+    .for('update');
   if (!product) throw notFound('Product');
 
   const [store] = await tx
