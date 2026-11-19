@@ -129,15 +129,70 @@ Local data lives in `.data/postgres`. Stop the app and delete that folder to sta
 
 ## Project structure
 
+The repository is a monorepo: the server, the web app and a package they share live side by side as npm workspaces, so one `npm install` sets up everything.
+
 ```
-apps/
-  server/      Express API and background workers (serves the web app in production)
-  web/         React app
-packages/
-  shared/      Validation schemas and types shared by the server and the web app
-docs/          Architecture, performance results, deployment guide, decision records
-scripts/       Local database, sample files, load tests
+stockroom/
+├── apps/
+│   ├── server/                    Back end: the REST API and the background workers
+│   │   ├── src/
+│   │   │   ├── main.ts            Starts the app: database, migrations, Redis, workers, then the HTTP server
+│   │   │   ├── app.ts             The Express app: middleware, API routes, and the built web app in production
+│   │   │   ├── config.ts          Reads and checks the settings (environment variables)
+│   │   │   ├── db/                Database tables (Drizzle schema), connection, migrations and demo data
+│   │   │   ├── http/              Shared request handling: sign-in check, validation, idempotency keys, errors
+│   │   │   ├── modules/           One folder per feature (see the table below)
+│   │   │   ├── redis.ts           Redis connection that reconnects by itself
+│   │   │   ├── metrics.ts         Prometheus metrics
+│   │   │   └── logger.ts          Structured logging (pino)
+│   │   ├── drizzle/               SQL migrations, applied in order when the server starts
+│   │   ├── test/                  API tests, run against a real Postgres and Redis
+│   │   └── build.mjs              Bundles the server into one file for production
+│   └── web/                       Front end: a React single-page app
+│       ├── src/
+│       │   ├── main.tsx           The pages and their addresses (routes)
+│       │   ├── api/               Calls to the API, wrapped in TanStack Query hooks
+│       │   ├── components/        Page layout, the sign-in guard and shared UI pieces
+│       │   ├── pages/             One file per screen: products, transfers, imports, settings…
+│       │   └── lib/               Helpers for showing dates, money, file sizes and durations
+│       └── vite.config.ts         Dev server; sends /api requests to the back end
+├── packages/
+│   └── shared/                    Zod schemas and types used by both server and web, so their rules match
+├── scripts/
+│   ├── dev-db.ts                  Runs a local Postgres for development (no Docker needed)
+│   ├── generate-import.ts         Writes large sample spreadsheets for testing imports
+│   ├── bench.ts                   Load tests against 100,000 products
+│   └── explain.ts                 Prints the database's query plans for the product list
+├── docs/
+│   ├── architecture.md            How it works: diagrams, data model, failure modes, scaling plan
+│   ├── performance.md             Load-test method, results and trade-offs
+│   ├── deploy.md                  Step-by-step free deployment
+│   ├── adr/                       Decision records: why each big design choice was made
+│   └── images/                    Screenshots used in this README
+├── .github/workflows/ci.yml       CI: type-check, test and build on every push
+├── render.yaml                    Hosting setup for Render
+├── .env.example                   Every setting, with an explanation
+└── tsconfig.base.json             TypeScript settings shared by all packages
 ```
+
+### Server modules
+
+Each feature lives in its own folder in `apps/server/src/modules/`. Most have a `routes.ts` with the API endpoints and a `service.ts` with the logic and database work.
+
+| Module | What it does |
+|---|---|
+| `auth` | Sign-up, sign-in and sign-out, sessions and password hashing |
+| `stores` | A business's stores |
+| `products` | Products: add, edit, archive, and the product list with search, filters and paging. Also the endpoint for changing stock |
+| `stock` | Applies every stock change and writes it to the stock history, safely when several happen at once |
+| `transfers` | Sending stock from one store to another, and receiving it |
+| `alerts` | Low-stock alerts |
+| `imports` | Spreadsheet uploads: reading CSV and Excel files, processing them in the background in blocks, live progress |
+| `events` | The outbox: events are saved with each change, then handed to the webhook sender |
+| `webhooks` | Webhook settings, signed delivery with retries, and blocking requests to private network addresses |
+| `team` | Invite links that add someone as an owner or staff member, the team list, and removing people |
+| `demo` | **Try the demo**: creates a sample business for each visitor and deletes it after 24 hours |
+| `maintenance` | Regular clean-up of expired sessions, old records and expired demos |
 
 ## Documentation
 
