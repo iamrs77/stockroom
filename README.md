@@ -150,12 +150,14 @@ stockroom/
 │   │   └── build.mjs              Bundles the server into one file for production
 │   └── web/                       Front end: a React single-page app
 │       ├── src/
-│       │   ├── main.tsx           The pages and their addresses (routes)
-│       │   ├── api/               Calls to the API, wrapped in TanStack Query hooks
-│       │   ├── components/        Page layout, the sign-in guard and shared UI pieces
-│       │   ├── pages/             One file per screen: products, transfers, imports, settings…
+│       │   ├── main.tsx           Mounts the app
+│       │   ├── app/               The router (pages and their addresses), the query cache and the page layout
+│       │   ├── features/          One folder per feature (see the table below)
+│       │   ├── api/               The API client, its error type and the shared cache keys
+│       │   ├── components/ui/     Shared UI pieces: buttons, inputs, cards, badges…
+│       │   ├── hooks/             Small reusable React hooks (debounce, idempotency key, ticking clock)
 │       │   └── lib/               Helpers for showing dates, money, file sizes and durations
-│       └── vite.config.ts         Dev server; sends /api requests to the back end
+│       └── vite.config.ts         Dev server; sends /api requests to the back end; the "@/" import alias
 ├── packages/
 │   └── shared/                    Zod schemas and types used by both server and web, so their rules match
 ├── scripts/
@@ -193,6 +195,23 @@ Each feature lives in its own folder in `apps/server/src/modules/`. Most have a 
 | `team` | Invite links that add someone as an owner or staff member, the team list, and removing people |
 | `demo` | **Try the demo**: creates a sample business for each visitor and deletes it after 24 hours |
 | `maintenance` | Regular clean-up of expired sessions, old records and expired demos |
+
+### Web features
+
+The web app is organised the same way, in `apps/web/src/features/`. Each folder holds that feature's pages, an `*-api.ts` file with its TanStack Query hooks, and a `components/` folder for the pieces only its pages use.
+
+| Feature | What it does |
+|---|---|
+| `auth` | Sign-in and sign-up pages, and the guards that send people to the right place |
+| `products` | The product list, a product's page with stock by store and its history, adding and editing products, changing stock |
+| `stores` | The store list and adding a store |
+| `imports` | Uploading a spreadsheet, live progress, and the rows that were skipped |
+| `transfers` | Transfers between stores: the list, sending and receiving |
+| `alerts` | Products that are low on stock |
+| `team` | The team list, invite links and the page for accepting an invite |
+| `webhooks` | Webhook endpoints, their signing secrets and delivery log |
+| `settings` | The settings page, which brings together the team and webhooks |
+| `demo` | The **Try the demo** card and the banner shown in a demo |
 
 ## Documentation
 

@@ -1,3 +1,5 @@
+// How numbers, money, dates and sizes are shown across the app.
+
 const money = new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' });
 const number = new Intl.NumberFormat('en-CA');
 const dateTime = new Intl.DateTimeFormat('en-CA', { dateStyle: 'medium', timeStyle: 'short' });
@@ -7,6 +9,10 @@ export const formatMoney = (cents: number) => money.format(cents / 100);
 export const formatNumber = (n: number) => number.format(n);
 export const formatDateTime = (iso: string) => dateTime.format(new Date(iso));
 
+/** "+5" or "-3", for stock changes. */
+export const formatSigned = (n: number) => (n > 0 ? `+${formatNumber(n)}` : formatNumber(n));
+
+/** "3 minutes ago", "in 2 days" or "just now". */
 export function formatRelative(iso: string) {
   const seconds = Math.round((new Date(iso).getTime() - Date.now()) / 1000);
   const units: [Intl.RelativeTimeFormatUnit, number][] = [
@@ -22,29 +28,13 @@ export function formatRelative(iso: string) {
   return 'just now';
 }
 
-export const formatSigned = (n: number) => (n > 0 ? `+${formatNumber(n)}` : formatNumber(n));
-
-/** "12.50" → 1250. Returns NaN for anything that isn't a plain amount. */
-export function parseMoney(value: string): number {
-  const trimmed = value.trim().replace(/^\$/, '');
-  if (!/^\d+(\.\d{0,2})?$/.test(trimmed)) return Number.NaN;
-  return Math.round(Number(trimmed) * 100);
-}
-
-export type StockStatus = 'out' | 'low' | 'ok';
-
-export function stockStatus(totalStock: number, reorderPoint: number): StockStatus {
-  if (totalStock === 0) return 'out';
-  if (reorderPoint > 0 && totalStock <= reorderPoint) return 'low';
-  return 'ok';
-}
-
 export function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+/** "45s" or "2m 05s". */
 export function formatDuration(ms: number) {
   const seconds = Math.max(0, Math.round(ms / 1000));
   if (seconds < 60) return `${seconds}s`;

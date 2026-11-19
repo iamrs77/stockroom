@@ -3,7 +3,9 @@
   "compilerOptions": {
     "lib": ["es2023", "dom", "dom.iterable"],
     "jsx": "react-jsx",
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+    // "@/features/products/..." instead of "../../../features/products/...".
+    "paths": { "@/*": ["./src/*"] }
   },
   "include": ["src", "vite.config.ts"]
 }

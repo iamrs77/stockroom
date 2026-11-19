@@ -1,22 +1,5 @@
-import type { ApiErrorBody, FieldIssue } from '@stockroom/shared';
-
-export class ApiError extends Error {
-  readonly status: number;
-  readonly code: string;
-  readonly details: FieldIssue[];
-
-  constructor(status: number, code: string, message: string, details: FieldIssue[] = []) {
-    super(message);
-    this.status = status;
-    this.code = code;
-    this.details = details;
-  }
-
-  /** Field errors keyed by field name, for showing next to form inputs. */
-  fieldErrors(): Record<string, string> {
-    return Object.fromEntries(this.details.map((d) => [d.path, d.message]));
-  }
-}
+import type { ApiErrorBody } from '@stockroom/shared';
+import { ApiError } from './api-error';
 
 type RequestOptions = {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -27,6 +10,10 @@ type RequestOptions = {
   query?: Record<string, string | number | boolean | undefined>;
 };
 
+/**
+ * Calls the Stockroom API with the session cookie and returns the JSON response.
+ * Any failure, including a network error, is thrown as an ApiError with a message fit to show.
+ */
 export async function api<T>(path: string, { method = 'GET', body, rawBody, headers, query }: RequestOptions = {}): Promise<T> {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(query ?? {})) {
