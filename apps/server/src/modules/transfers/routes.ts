@@ -1,11 +1,12 @@
 import { transferCreateSchema, transferListQuerySchema, transferReceiveSchema } from '@stockroom/shared';
 import { Router } from 'express';
-import type { AppDeps } from '../../app';
-import { getAuth } from '../../http/auth';
-import { idempotent } from '../../http/idempotency';
-import { parse, parseId } from '../../http/validate';
+import type { AppDeps } from '@/app';
+import { getAuth } from '@/http/auth';
+import { idempotent } from '@/http/idempotency';
+import { parse, parseId } from '@/http/validate';
 import { cancelTransfer, createTransfer, getTransfer, listTransfers, receiveTransfer } from './service';
 
+/** Moving stock between stores: list, send, receive and cancel. Changes take an Idempotency-Key. */
 export function transfersRouter(deps: AppDeps) {
   const { db, outbox } = deps;
   const router = Router();

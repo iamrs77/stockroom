@@ -9,10 +9,10 @@ import {
 import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { z } from 'zod';
-import type { Db, Executor, Tx } from '../../db/client';
-import { products, stores, tenants, transferLines, transfers, users } from '../../db/schema';
-import { HttpError, notFound } from '../../http/errors';
-import { recordEvent, syncLowStockAlerts } from '../events/outbox';
+import type { Db, Executor, Tx } from '@/db/client';
+import { products, stores, tenants, transferLines, transfers, users } from '@/db/schema';
+import { HttpError, notFound } from '@/http/errors';
+import { recordEvent, syncLowStockAlerts } from '@/modules/events/outbox';
 
 /*
  * Lock order, shared by every writer in the app so none of them can deadlock with another:

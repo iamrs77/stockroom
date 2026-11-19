@@ -1,4 +1,4 @@
-import { loadConfig } from '../config';
+import { loadConfig } from '@/config';
 import { createDb, waitForDatabase } from './client';
 import { runMigrations } from './migrate';
 

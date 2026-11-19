@@ -1,8 +1,8 @@
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { tenants } from '../src/db/schema';
-import { processImport } from '../src/modules/imports/process';
-import { createImport } from '../src/modules/imports/service';
+import { tenants } from '@/db/schema';
+import { processImport } from '@/modules/imports/process';
+import { createImport } from '@/modules/imports/service';
 import { createProduct, setupTestApp, signUp, silentLogger } from './helpers';
 
 const { app, db } = setupTestApp();

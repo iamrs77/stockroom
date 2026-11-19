@@ -6,13 +6,14 @@ import {
   stockAdjustmentSchema,
 } from '@stockroom/shared';
 import { Router } from 'express';
-import type { AppDeps } from '../../app';
-import { getAuth, requireRole } from '../../http/auth';
-import { idempotent } from '../../http/idempotency';
-import { parse, parseId } from '../../http/validate';
-import { applyStockChange, listMovements } from '../stock/service';
+import type { AppDeps } from '@/app';
+import { getAuth, requireRole } from '@/http/auth';
+import { idempotent } from '@/http/idempotency';
+import { parse, parseId } from '@/http/validate';
+import { applyStockChange, listMovements } from '@/modules/stock/service';
 import { archiveProduct, createProduct, getProduct, listProducts, updateProduct } from './service';
 
+/** The product catalogue, plus each product's stock history and stock changes. Only owners edit products. */
 export function productsRouter(deps: AppDeps) {
   const { db } = deps;
   const router = Router();

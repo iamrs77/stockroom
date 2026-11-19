@@ -3,14 +3,14 @@ import type { ProductCreateInput, SessionUser, Store } from '@stockroom/shared';
 import { pino } from 'pino';
 import request from 'supertest';
 import { afterAll, expect, inject } from 'vitest';
-import { createApp } from '../src/app';
-import type { Config } from '../src/config';
-import { createDb } from '../src/db/client';
-import { ImportEvents } from '../src/modules/imports/events';
-import { createOutboxPoke, startOutboxRelay } from '../src/modules/events/relay';
-import { createImportQueue, startImportWorker } from '../src/modules/imports/queue';
-import { createWebhookQueue, startWebhookWorker } from '../src/modules/webhooks/delivery';
-import { createRedis, deleteKeysWithPrefix } from '../src/redis';
+import { createApp } from '@/app';
+import type { Config } from '@/config';
+import { createDb } from '@/db/client';
+import { ImportEvents } from '@/modules/imports/events';
+import { createOutboxPoke, startOutboxRelay } from '@/modules/events/relay';
+import { createImportQueue, startImportWorker } from '@/modules/imports/queue';
+import { createWebhookQueue, startWebhookWorker } from '@/modules/webhooks/delivery';
+import { createRedis, deleteKeysWithPrefix } from '@/redis';
 
 export const silentLogger = pino({ level: 'silent' });
 

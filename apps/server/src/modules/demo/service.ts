@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { and, asc, eq, gt, inArray, isNotNull, lt, sql } from 'drizzle-orm';
-import type { Config } from '../../config';
-import type { Db } from '../../db/client';
-import { seedSampleBusiness } from '../../db/sample-business';
-import { products, stockLevels, stores, tenants, users } from '../../db/schema';
-import { HttpError } from '../../http/errors';
-import type { Logger } from '../../logger';
-import { createTransfer, receiveTransfer } from '../transfers/service';
+import type { Config } from '@/config';
+import type { Db } from '@/db/client';
+import { seedSampleBusiness } from '@/db/sample-business';
+import { products, stockLevels, stores, tenants, users } from '@/db/schema';
+import { HttpError } from '@/http/errors';
+import type { Logger } from '@/logger';
+import { createTransfer, receiveTransfer } from '@/modules/transfers/service';
 
 /**
  * Creates a private demo business for one visitor: the sample catalogue, three stores, opening

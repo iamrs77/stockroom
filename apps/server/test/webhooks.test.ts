@@ -4,8 +4,8 @@ import type { AddressInfo } from 'node:net';
 import type { WebhookDelivery, WebhookEndpointCreated, WebhookEvent } from '@stockroom/shared';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { outboxEvents } from '../src/db/schema';
-import { assertDeliverableUrl, isPrivateAddress } from '../src/modules/webhooks/safe-http';
+import { outboxEvents } from '@/db/schema';
+import { assertDeliverableUrl, isPrivateAddress } from '@/modules/webhooks/safe-http';
 import { createProduct, setupTestApp, signUp, waitFor } from './helpers';
 
 const { app, db, relay } = setupTestApp({ webhooks: true });

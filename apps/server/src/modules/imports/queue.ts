@@ -1,10 +1,10 @@
 import { DelayedError, Queue, Worker } from 'bullmq';
 import { and, eq, inArray, lt } from 'drizzle-orm';
 import type { Redis } from 'ioredis';
-import type { Db } from '../../db/client';
-import { imports } from '../../db/schema';
-import type { Logger } from '../../logger';
-import { createRedis, withTimeout } from '../../redis';
+import type { Db } from '@/db/client';
+import { imports } from '@/db/schema';
+import type { Logger } from '@/logger';
+import { createRedis, withTimeout } from '@/redis';
 import type { ImportEvents } from './events';
 import { failImport, processImport } from './process';
 import { getImportSummary } from './service';

@@ -1,10 +1,10 @@
 import { IMPORT_MAX_ROWS, type ImportSummary } from '@stockroom/shared';
 import { and, count, eq, inArray, sql } from 'drizzle-orm';
-import { pgError, PG_UNIQUE_VIOLATION, type Db } from '../../db/client';
-import { importErrors, importFiles, imports, stores, tenants } from '../../db/schema';
-import type { Logger } from '../../logger';
-import { importRowsProcessed } from '../../metrics';
-import { recordEvent } from '../events/outbox';
+import { pgError, PG_UNIQUE_VIOLATION, type Db } from '@/db/client';
+import { importErrors, importFiles, imports, stores, tenants } from '@/db/schema';
+import type { Logger } from '@/logger';
+import { importRowsProcessed } from '@/metrics';
+import { recordEvent } from '@/modules/events/outbox';
 import { applyChunk, type ChunkContext } from './apply-chunk';
 import { mapColumns, parseRow, type ImportRow, type RowError } from './columns';
 import { ImportFileError, isBlankRow, readRows, type SheetRow } from './read-rows';

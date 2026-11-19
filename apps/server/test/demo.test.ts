@@ -2,10 +2,10 @@ import type { SessionUser, TransferSummary } from '@stockroom/shared';
 import { eq } from 'drizzle-orm';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
-import { tenants } from '../src/db/schema';
-import { deleteExpiredDemos } from '../src/modules/demo/service';
-import { processImport } from '../src/modules/imports/process';
-import { createImport, getImportDetail } from '../src/modules/imports/service';
+import { tenants } from '@/db/schema';
+import { deleteExpiredDemos } from '@/modules/demo/service';
+import { processImport } from '@/modules/imports/process';
+import { createImport, getImportDetail } from '@/modules/imports/service';
 import { PASSWORD, setupTestApp, signUp, silentLogger } from './helpers';
 
 const { app, db } = setupTestApp();

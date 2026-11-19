@@ -6,10 +6,10 @@ import {
 } from '@stockroom/shared';
 import { and, asc, desc, eq, isNull, sql, type SQL } from 'drizzle-orm';
 import type { z } from 'zod';
-import { pgError, PG_UNIQUE_VIOLATION, type Db, type Executor } from '../../db/client';
-import { products, stockLevels, stores, transferLines, transfers } from '../../db/schema';
-import { HttpError, notFound } from '../../http/errors';
-import { syncLowStockAlerts } from '../events/outbox';
+import { pgError, PG_UNIQUE_VIOLATION, type Db, type Executor } from '@/db/client';
+import { products, stockLevels, stores, transferLines, transfers } from '@/db/schema';
+import { HttpError, notFound } from '@/http/errors';
+import { syncLowStockAlerts } from '@/modules/events/outbox';
 
 const listColumns = {
   id: products.id,

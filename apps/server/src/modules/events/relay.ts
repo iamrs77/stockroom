@@ -1,10 +1,10 @@
 import { WEBHOOK_TEST_EVENT } from '@stockroom/shared';
 import { inArray, sql } from 'drizzle-orm';
 import type { Redis } from 'ioredis';
-import type { Db } from '../../db/client';
-import { outboxEvents } from '../../db/schema';
-import type { Logger } from '../../logger';
-import type { WebhookQueue } from '../webhooks/delivery';
+import type { Db } from '@/db/client';
+import { outboxEvents } from '@/db/schema';
+import type { Logger } from '@/logger';
+import type { WebhookQueue } from '@/modules/webhooks/delivery';
 
 const BATCH = 100;
 

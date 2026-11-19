@@ -1,9 +1,9 @@
 import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { outboxEvents } from '../src/db/schema';
-import { createImport } from '../src/modules/imports/service';
-import { processImport } from '../src/modules/imports/process';
-import { applyStockChange } from '../src/modules/stock/service';
+import { outboxEvents } from '@/db/schema';
+import { createImport } from '@/modules/imports/service';
+import { processImport } from '@/modules/imports/process';
+import { applyStockChange } from '@/modules/stock/service';
 import { createProduct, setupTestApp, signUp, silentLogger } from './helpers';
 
 const { app, db } = setupTestApp();

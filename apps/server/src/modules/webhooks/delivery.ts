@@ -3,11 +3,11 @@ import type { WebhookEvent } from '@stockroom/shared';
 import { Queue, Worker } from 'bullmq';
 import { and, eq, lt, sql } from 'drizzle-orm';
 import type { Redis } from 'ioredis';
-import type { Db } from '../../db/client';
-import { outboxEvents, webhookDeliveries, webhookEndpoints } from '../../db/schema';
-import type { Logger } from '../../logger';
-import { webhookAttempts } from '../../metrics';
-import { createRedis, withTimeout } from '../../redis';
+import type { Db } from '@/db/client';
+import { outboxEvents, webhookDeliveries, webhookEndpoints } from '@/db/schema';
+import type { Logger } from '@/logger';
+import { webhookAttempts } from '@/metrics';
+import { createRedis, withTimeout } from '@/redis';
 import { postJson } from './safe-http';
 
 export const WEBHOOK_QUEUE = 'webhooks';

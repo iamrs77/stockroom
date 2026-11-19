@@ -1,10 +1,10 @@
 import { IMPORT_MAX_BYTES, importStatuses, isImportFinished, type ImportSummary } from '@stockroom/shared';
 import express, { Router } from 'express';
 import { z } from 'zod';
-import type { AppDeps } from '../../app';
-import { getAuth, requireRole } from '../../http/auth';
-import { HttpError } from '../../http/errors';
-import { parse, parseId } from '../../http/validate';
+import type { AppDeps } from '@/app';
+import { getAuth, requireRole } from '@/http/auth';
+import { HttpError } from '@/http/errors';
+import { parse, parseId } from '@/http/validate';
 import { MAX_STORED_ERRORS } from './process';
 import { detectFormat, ImportFileError } from './read-rows';
 import {
@@ -22,6 +22,7 @@ const uploadQuerySchema = z.object({ fileName: z.string().trim().min(1, 'File na
 /** Stops the browser and proxies from caching or buffering a download or an event stream. */
 const noStore = { 'Cache-Control': 'no-store' };
 
+/** Spreadsheet imports: the template, uploads (owners only), progress as a live stream, and skipped rows as CSV. */
 export function importsRouter(deps: AppDeps) {
   const { db, imports } = deps;
   const router = Router();

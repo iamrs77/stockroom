@@ -1,8 +1,8 @@
 import { and, isNotNull, lt } from 'drizzle-orm';
-import type { Db } from '../../db/client';
-import { idempotencyKeys, outboxEvents, sessions } from '../../db/schema';
-import type { Logger } from '../../logger';
-import { deleteExpiredDemos } from '../demo/service';
+import type { Db } from '@/db/client';
+import { idempotencyKeys, outboxEvents, sessions } from '@/db/schema';
+import type { Logger } from '@/logger';
+import { deleteExpiredDemos } from '@/modules/demo/service';
 
 const HOUR = 60 * 60 * 1000;
 

@@ -1,7 +1,7 @@
 import writeXlsxFile from 'write-excel-file/node';
 import { describe, expect, it } from 'vitest';
-import { mapColumns, parseRow } from '../src/modules/imports/columns';
-import { detectFormat, ImportFileError, readRows, type SheetRow } from '../src/modules/imports/read-rows';
+import { mapColumns, parseRow } from '@/modules/imports/columns';
+import { detectFormat, ImportFileError, readRows, type SheetRow } from '@/modules/imports/read-rows';
 
 const stores = [
   { id: 'store-qsw', code: 'QSW' },

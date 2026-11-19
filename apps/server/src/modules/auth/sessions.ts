@@ -2,8 +2,8 @@ import { createHash, randomBytes } from 'node:crypto';
 import type { Role, SessionUser } from '@stockroom/shared';
 import { and, eq, gt, isNull } from 'drizzle-orm';
 import type { CookieOptions, Response } from 'express';
-import type { Db } from '../../db/client';
-import { sessions, tenants, users } from '../../db/schema';
+import type { Db } from '@/db/client';
+import { sessions, tenants, users } from '@/db/schema';
 
 export const SESSION_COOKIE = 'sid';
 

@@ -140,7 +140,7 @@ stockroom/
 │   │   │   ├── app.ts             The Express app: middleware, API routes, and the built web app in production
 │   │   │   ├── config.ts          Reads and checks the settings (environment variables)
 │   │   │   ├── db/                Database tables (Drizzle schema), connection, migrations and demo data
-│   │   │   ├── http/              Shared request handling: sign-in check, validation, idempotency keys, errors
+│   │   │   ├── http/              Shared request handling: sign-in check, validation, idempotency keys, rate limits, errors
 │   │   │   ├── modules/           One folder per feature (see the table below)
 │   │   │   ├── redis.ts           Redis connection that reconnects by itself
 │   │   │   ├── metrics.ts         Prometheus metrics
@@ -179,7 +179,7 @@ stockroom/
 
 ### Server modules
 
-Each feature lives in its own folder in `apps/server/src/modules/`. Most have a `routes.ts` with the API endpoints and a `service.ts` with the logic and database work.
+Each feature lives in its own folder in `apps/server/src/modules/`. Where a module has endpoints, `routes.ts` only deals with HTTP (reading the request, checking the user's role, sending the response) and calls `service.ts`, which has the logic and database work. Code anywhere in the server imports another folder's files as `@/…` (e.g. `@/db/schema`) rather than with `../../` paths.
 
 | Module | What it does |
 |---|---|

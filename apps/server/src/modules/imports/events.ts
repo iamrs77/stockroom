@@ -1,7 +1,7 @@
 import type { ImportSummary } from '@stockroom/shared';
 import type { Redis } from 'ioredis';
-import type { Logger } from '../../logger';
-import { withTimeout } from '../../redis';
+import type { Logger } from '@/logger';
+import { withTimeout } from '@/redis';
 
 type Listener = (summary: ImportSummary) => void;
 

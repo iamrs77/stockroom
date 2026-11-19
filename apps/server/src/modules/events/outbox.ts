@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
-import type { Executor } from '../../db/client';
-import { outboxEvents } from '../../db/schema';
+import type { Executor } from '@/db/client';
+import { outboxEvents } from '@/db/schema';
 
 /**
  * Writes an event to the outbox. Call it inside the transaction that makes the change, so the

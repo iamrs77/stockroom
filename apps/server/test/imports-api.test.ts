@@ -2,9 +2,9 @@ import type { ImportDetail, ImportSummary } from '@stockroom/shared';
 import { eq } from 'drizzle-orm';
 import writeXlsxFile from 'write-excel-file/node';
 import { describe, expect, inject, it } from 'vitest';
-import { imports } from '../src/db/schema';
-import { ImportEvents } from '../src/modules/imports/events';
-import { startImportWorker } from '../src/modules/imports/queue';
+import { imports } from '@/db/schema';
+import { ImportEvents } from '@/modules/imports/events';
+import { startImportWorker } from '@/modules/imports/queue';
 import { setupTestApp, signUp, silentLogger, waitFor } from './helpers';
 
 const { app, db } = setupTestApp({ worker: true, importChunkSize: 2 });

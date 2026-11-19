@@ -1,8 +1,8 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { importFiles, imports, products, stockLevels, stockMovements } from '../src/db/schema';
-import { processImport } from '../src/modules/imports/process';
-import { createImport, getImportDetail } from '../src/modules/imports/service';
+import { importFiles, imports, products, stockLevels, stockMovements } from '@/db/schema';
+import { processImport } from '@/modules/imports/process';
+import { createImport, getImportDetail } from '@/modules/imports/service';
 import { setupTestApp, signUp, silentLogger } from './helpers';
 
 const { app, db } = setupTestApp();

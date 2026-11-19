@@ -1,5 +1,5 @@
 import type { Tx } from './client';
-import { syncLowStockAlerts } from '../modules/events/outbox';
+import { syncLowStockAlerts } from '@/modules/events/outbox';
 import { products, stockLevels, stockMovements, stores } from './schema';
 
 /** A small café-and-gift-shop catalogue: 136 products in five categories. */

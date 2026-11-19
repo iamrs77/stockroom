@@ -1,7 +1,9 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "types": ["node"]
+    "types": ["node"],
+    // "@/modules/auth/sessions" instead of "../../modules/auth/sessions". tsx and esbuild read this too.
+    "paths": { "@/*": ["./src/*"] }
   },
   "include": ["src", "test", "*.ts"]
 }

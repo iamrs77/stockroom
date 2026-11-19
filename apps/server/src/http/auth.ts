@@ -1,13 +1,13 @@
 import type { Role } from '@stockroom/shared';
 import type { Request, RequestHandler } from 'express';
-import type { AppDeps } from '../app';
+import type { AppDeps } from '@/app';
 import {
   extendSessionIfStale,
   findSession,
   SESSION_COOKIE,
   setSessionCookie,
   type AuthContext,
-} from '../modules/auth/sessions';
+} from '@/modules/auth/sessions';
 import { HttpError } from './errors';
 
 declare global {

@@ -4,8 +4,8 @@
  * The live demo doesn't use this: each visitor gets their own sandbox (see modules/demo).
  */
 import { eq } from 'drizzle-orm';
-import { loadConfig } from '../config';
-import { hashPassword } from '../modules/auth/passwords';
+import { loadConfig } from '@/config';
+import { hashPassword } from '@/modules/auth/passwords';
 import { createDb, waitForDatabase } from './client';
 import { runMigrations } from './migrate';
 import { seedSampleBusiness } from './sample-business';

@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import type { RequestHandler } from 'express';
-import type { AppDeps } from '../app';
-import { idempotencyKeys } from '../db/schema';
+import type { AppDeps } from '@/app';
+import { idempotencyKeys } from '@/db/schema';
 import { getAuth } from './auth';
 import { HttpError } from './errors';
 

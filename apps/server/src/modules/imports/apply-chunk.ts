@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
-import type { Tx } from '../../db/client';
-import { syncLowStockAlerts } from '../events/outbox';
+import type { Tx } from '@/db/client';
+import { syncLowStockAlerts } from '@/modules/events/outbox';
 import type { ImportRow, RowError } from './columns';
 
 export type ChunkContext = {

@@ -1,9 +1,9 @@
 import type { PublicConfig } from '@stockroom/shared';
 import { Router } from 'express';
-import { rateLimit } from 'express-rate-limit';
-import type { AppDeps } from '../../app';
-import { HttpError } from '../../http/errors';
-import { createSession, setSessionCookie, toSessionUser } from '../auth/sessions';
+import type { AppDeps } from '@/app';
+import { HttpError } from '@/http/errors';
+import { rateLimiter } from '@/http/rate-limit';
+import { createSession, setSessionCookie, toSessionUser } from '@/modules/auth/sessions';
 import { createDemoBusiness } from './service';
 
 /** Public routes: what the sign-in page offers, and "Try the demo". */
@@ -23,14 +23,10 @@ export function demoRouter(deps: AppDeps) {
   });
 
   // Creating a demo writes ~700 rows, so it's limited per visitor, and the total number is capped.
-  const limiter = rateLimit({
+  const limiter = rateLimiter({
     windowMs: 60 * 60 * 1000,
     limit: config.demo.rateLimit,
-    standardHeaders: 'draft-8',
-    legacyHeaders: false,
-    handler: () => {
-      throw new HttpError(429, 'too_many_requests', "You've started several demos recently. Please try again later.");
-    },
+    message: "You've started several demos recently. Please try again later.",
   });
 
   router.post('/demo', limiter, async (_req, res) => {

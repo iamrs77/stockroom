@@ -5,8 +5,8 @@ import path from 'node:path';
 import EmbeddedPostgres from 'embedded-postgres';
 import { Redis } from 'ioredis';
 import type { TestProject } from 'vitest/node';
-import { createDb } from '../src/db/client';
-import { runMigrations } from '../src/db/migrate';
+import { createDb } from '@/db/client';
+import { runMigrations } from '@/db/migrate';
 
 declare module 'vitest' {
   export interface ProvidedContext {

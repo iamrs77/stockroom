@@ -1,11 +1,11 @@
 import type { movementsQuerySchema, StockReason } from '@stockroom/shared';
 import { and, desc, eq, lt, sql } from 'drizzle-orm';
 import type { z } from 'zod';
-import { pgError, PG_CHECK_VIOLATION, type Db, type Executor } from '../../db/client';
-import { products, stockLevels, stockMovements, stores, users } from '../../db/schema';
-import { HttpError, notFound } from '../../http/errors';
-import { syncLowStockAlerts } from '../events/outbox';
-import { activeProduct } from '../products/service';
+import { pgError, PG_CHECK_VIOLATION, type Db, type Executor } from '@/db/client';
+import { products, stockLevels, stockMovements, stores, users } from '@/db/schema';
+import { HttpError, notFound } from '@/http/errors';
+import { syncLowStockAlerts } from '@/modules/events/outbox';
+import { activeProduct } from '@/modules/products/service';
 
 export type StockChange = {
   tenantId: string;
