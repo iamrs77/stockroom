@@ -2,13 +2,15 @@
 
 Inventory for small retailers: products, stock across several stores, transfers between them, a full history of every change, low-stock alerts sent as signed webhooks, staff accounts, and spreadsheet imports of up to 100,000 rows that run in the background. Built to be correct under concurrency and failure, and to run entirely on free hosting.
 
-![Product list with search, sorting and low-stock badges](docs/images/products.png)
+**Live demo: [stockroom-5x6w.onrender.com](https://stockroom-5x6w.onrender.com)**. Press **Try the demo** for your own sample business, yours for 24 hours. It runs on free plans, so if nobody has visited for a while the first load takes about a minute while the server wakes up.
+
+![The product list in a demo business, with search, sorting, low-stock badges and the demo banner](docs/images/products.png)
 
 ![An import of 30,000 rows in progress, with live counts of new products, updates, stock changes and skipped rows](docs/images/import-progress.png)
 
 ![A received transfer from Queen Street West to Kensington Market, with one mug recorded as short](docs/images/transfer.png)
 
-> **Status:** feature-complete and ready to deploy for free (Render, Neon and Upstash; see [docs/deploy.md](docs/deploy.md)). On the live demo, **Try the demo** gives each visitor a private sample business for 24 hours. See the [roadmap](#roadmap).
+> **Status:** all five phases are done, and it's [live](https://stockroom-5x6w.onrender.com) on free plans (Render, Neon and Upstash; see [docs/deploy.md](docs/deploy.md)).
 
 ## What's interesting here
 
@@ -114,4 +116,4 @@ scripts/
 - [x] **Phase 2: bulk imports.** CSV and Excel files of up to 100,000 rows, processed in the background in chunks that resume after a crash, with live progress and a per-row problem report
 - [x] **Phase 3: operations.** Transfers between stores, low-stock alerts through a transactional outbox, signed webhooks with retries, staff accounts with invite links
 - [x] **Phase 4: performance.** Load tests and query plans; stock totals kept by triggers, keyset paging, capped counts and trigram search; Prometheus metrics. [Results](docs/performance.md)
-- [ ] **Phase 5: live demo.** ~~Sandbox business per visitor~~ (done), ~~free deployment config and guide~~ (done); next, the live link
+- [x] **Phase 5: live demo.** [Deployed for free](https://stockroom-5x6w.onrender.com) on Render, Neon and Upstash, with a private sandbox business per visitor that's deleted after a day
