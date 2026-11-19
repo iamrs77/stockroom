@@ -1,0 +1,31 @@
+{
+  "name": "stockroom",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Inventory for small retailers, with a background bulk-import pipeline.",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "db": "tsx scripts/dev-db.ts",
+    "dev": "concurrently -k -n db,server,web -c blue,green,magenta \"npm:db\" \"npm:dev -w @stockroom/server\" \"npm:dev -w @stockroom/web\"",
+    "db:generate": "npm run db:generate -w @stockroom/server",
+    "db:migrate": "npm run db:migrate -w @stockroom/server",
+    "db:seed": "npm run db:seed -w @stockroom/server",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "build": "npm run build -w @stockroom/web && npm run build -w @stockroom/server",
+    "start": "npm run start -w @stockroom/server"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.7",
+    "embedded-postgres": "^18.7.0-beta.19",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
