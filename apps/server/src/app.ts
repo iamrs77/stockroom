@@ -10,6 +10,7 @@ import type { createDb, Db } from './db/client';
 import { requireAuth } from './http/auth';
 import { errorHandler, notFoundHandler } from './http/errors';
 import type { Logger } from './logger';
+import { measureRequests, metricsEndpoint } from './metrics';
 import { alertsRouter } from './modules/alerts/routes';
 import { authRouter } from './modules/auth/routes';
 import type { ImportEvents } from './modules/imports/events';
@@ -54,6 +55,8 @@ export function createApp(deps: AppDeps) {
       customLogLevel: (_req, res, err) => (err || res.statusCode >= 500 ? 'error' : 'info'),
     }),
   );
+  app.use(measureRequests);
+  app.get('/metrics', metricsEndpoint({ token: config.metricsToken, isProduction: config.isProduction }));
   app.use(helmet());
   app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());

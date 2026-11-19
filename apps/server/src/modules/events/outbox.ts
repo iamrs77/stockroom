@@ -26,12 +26,12 @@ export async function syncLowStockAlerts(tx: Executor, tenantId: string, product
   if (productIds.length === 0) return;
   await tx.execute(sql`
     with totals as (
-      select p.id, p.sku, p.name, p.reorder_point, p.archived_at, coalesce(sum(sl.quantity), 0)::int as stock
+      -- total_stock is maintained by triggers on stock_levels, and already includes this
+      -- transaction's changes (statement triggers fire before the next statement runs).
+      select p.id, p.sku, p.name, p.reorder_point, p.archived_at, p.total_stock as stock
       from products p
-      left join stock_levels sl on sl.product_id = p.id
       where p.tenant_id = ${tenantId}
         and p.id in (select (jsonb_array_elements_text(${JSON.stringify(productIds)}::jsonb))::uuid)
-      group by p.id
     ),
     opened as (
       insert into low_stock_alerts (tenant_id, product_id, stock_at_open, reorder_point_at_open)

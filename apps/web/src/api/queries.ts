@@ -23,11 +23,10 @@ import {
 import type {
   CursorPage,
   LoginInput,
-  Page,
   ProductCreateInput,
   ProductDetail,
-  ProductListItem,
   ProductListParams,
+  ProductPage,
   ProductUpdateInput,
   RegisterInput,
   SessionUser,
@@ -117,7 +116,7 @@ export function useCreateStore() {
 export function useProducts(query: ProductListParams) {
   return useQuery({
     queryKey: keys.productList(query),
-    queryFn: () => api<Page<ProductListItem>>('/products', { query }),
+    queryFn: () => api<ProductPage>('/products', { query }),
     // Keep showing the current page while the next one loads, instead of flashing a spinner.
     placeholderData: keepPreviousData,
   });

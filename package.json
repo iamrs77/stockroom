@@ -14,18 +14,25 @@
     "db:generate": "npm run db:generate -w @stockroom/server",
     "db:migrate": "npm run db:migrate -w @stockroom/server",
     "db:seed": "npm run db:seed -w @stockroom/server",
-    "typecheck": "npm run typecheck --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present && tsc --noEmit -p scripts",
     "test": "npm run test --workspaces --if-present",
     "build": "npm run build -w @stockroom/web && npm run build -w @stockroom/server",
     "start": "npm run start -w @stockroom/server",
-    "sample:import": "tsx scripts/generate-import.ts"
+    "sample:import": "tsx scripts/generate-import.ts",
+    "bench": "tsx scripts/bench.ts",
+    "explain": "tsx scripts/explain.ts"
   },
   "engines": {
     "node": ">=22.12"
   },
   "devDependencies": {
+    "@types/autocannon": "^7.12.7",
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "autocannon": "^9.0.0",
     "concurrently": "^10.0.7",
     "embedded-postgres": "^18.7.0-beta.19",
+    "pg": "^8.23.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   }

@@ -119,6 +119,7 @@ erDiagram
   }
 ```
 
+- **`products.total_stock` is a stored sum** of the product's `stock_levels`, kept in the same transaction by statement-level triggers, so lists can sort and filter by stock with an index ([ADR 0009](adr/0009-read-performance.md)).
 - **`stock_movements` is an append-only ledger** and the source of truth for history. **`stock_levels` holds the current balance**, updated in the same transaction as each movement, so reads don't have to add up the ledger. See [ADR 0002](adr/0002-stock-ledger.md).
 - **Products are archived, not deleted**, so their history stays intact. A partial unique index (`WHERE archived_at IS NULL`) frees an archived product's SKU for reuse.
 - Every business table has a `tenant_id`. Deleting a tenant cascades to all of its data.
@@ -305,7 +306,7 @@ Postgres row-level security would add a fourth layer that holds even if a query 
 
 ### Rough sizing
 
-These are estimates for planning. Measured numbers will replace them in phase 4.
+Estimates for planning the free tier. The measured numbers follow.
 
 - A typical small retailer: ~2,000 SKUs × 3 stores ≈ **6,000 stock rows**, and maybe **500 stock movements a day**.
 - A movement row plus its index entries is roughly **150 bytes**, so one tenant adds ~75 KB a day, or ~27 MB a year.
@@ -318,30 +319,30 @@ On a laptop, with the production build and local Postgres and Redis:
 | What | Result |
 |---|---|
 | Upload a 100,000-row, 6 MB CSV | `202` in ~280 ms |
-| Import it (99,786 new products, 296,761 stock changes) | ~27 s, ~3,700 rows/s |
+| Import it (99,786 new products, 296,761 stock changes) | ~40 s, ~2,500 rows/s on a fresh database (27 s before phase 4's indexes and stock totals) |
 | Import the same file again | 0 changes, ~6 s |
 | Recover from a hard kill at 32% | Resumed about a minute after restart, results exact |
 
-Product list, best of 3, with about 100,000 products in one business. These are the baseline that phase 4 will improve:
+Product list with 100,000 products in one business, 10 concurrent connections, median latency. The full method, query plans and trade-offs are in [performance.md](performance.md).
 
-| Query | Time |
-|---|---|
-| First page, sorted by name | 171 ms |
-| Page 2,000 (`OFFSET` 49,975) | 396 ms |
-| Sorted by total stock | 522 ms |
-| Low-stock filter | 435 ms |
-| Search for "honey" | 193 ms |
-
-Most of the cost is the `count(*)` for the page total, and summing stock per row for every product before sorting.
+| Query | Before phase 4 | After |
+|---|--:|--:|
+| Low-stock filter | 1,651 ms | 6 ms |
+| Sorted by total stock | 902 ms | 6 ms |
+| Page 2,000 | 477 ms | 7 ms by cursor, 24 ms by number |
+| First page | 13 ms | 6 ms |
+| Search for a SKU | 93 ms | 19 ms |
 
 ### What breaks first, and what to do about it
 
 | Pressure | First fix | Later |
 |---|---|---|
-| Product list sorts and filters by total stock, computed per row (522 ms at 100k) | Keep a `total_stock` column on `products`, maintained in the same transaction as stock changes, and index it | — |
-| Exact page totals cost a `count(*)` on every page | Show "about N" from the planner's estimate beyond a threshold | — |
-| Deep pages of the product list (`OFFSET`) | Keyset pagination, as stock history already uses | — |
-| Search with `ILIKE '%term%'` | `pg_trgm` GIN index | Postgres full-text search |
+| ~~Sorting and filtering by stock, computed per row~~ | **Done:** `total_stock` kept by triggers, indexed; `low_stock` as a boolean column with a partial index ([ADR 0009](adr/0009-read-performance.md)) | — |
+| ~~Exact page totals on every page~~ | **Done:** count up to 10,001, then show "10,000+" | — |
+| ~~Deep pages (`OFFSET`)~~ | **Done:** keyset paging by cursor | — |
+| ~~Search with `ILIKE '%term%'`~~ | **Done:** `pg_trgm` GIN index on a generated `search_text` column | The index spans all businesses, so search slows as the whole database grows: a `(tenant_id, search_text)` GIN index (btree_gin), or partitioning by tenant |
+| Database CPU becomes the limit (watch `db_pool_connections{state="waiting"}`) | Read replica for list queries | Cache the first page per business, keyed by a version each stock change increments |
+| Imports are slower with 9 indexes on `products` (40 s for 100k rows) | Accept: reads matter more | Drop rarely used sort indexes, or move totals to a narrow table so updating them is a cheap in-place update |
 | `stock_movements` grows forever (~300k rows from one import) | Index on `(tenant_id, product_id, id)` keeps history reads constant-time | Partition by month; archive old partitions |
 | More than one API instance | Sessions, idempotency, stock and imports are all in Postgres, so instances are stateless | Move the rate-limit counters to Redis (they're per-process today) |
 | Imports compete with the API for CPU | Run the worker as its own process (`ROLE=worker`) | Scale workers separately from the API |
@@ -353,4 +354,5 @@ Most of the cost is the `count(*)` for the page total, and summing stock per row
 - Every import keeps its own counters, timings and problem list, which is what the import page shows.
 - Redis outages are logged once when they start and once when they end, not on every retry.
 - Every webhook delivery records its attempts, last status code and last error, which the settings page shows.
-- Planned: Prometheus metrics (request latency histograms, queue depth, job duration) and request ids carried into background jobs.
+- **Prometheus metrics** at `GET /metrics` (bearer token; off in production without one): request latency by route pattern, queue depths, the outbox backlog, database pool waits, import rows and webhook outcomes, plus Node's event-loop lag and memory. [performance.md](performance.md#watching-it-in-production) lists what to watch.
+- Planned: request ids carried into background jobs.

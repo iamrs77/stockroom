@@ -17,7 +17,11 @@ const columns: { key: ProductSortField; label: string; align?: 'right' }[] = [
   { key: 'updated', label: 'Updated', align: 'right' },
 ];
 
-/** List state lives in the URL, so a filtered, sorted page can be bookmarked or shared. */
+/**
+ * List state lives in the URL, so a filtered, sorted page can be bookmarked or shared. Pages are
+ * followed by cursor (after/before), so a deep page is as fast as the first; `page` is only the
+ * number shown to the reader.
+ */
 function useListParams() {
   const [params, setParams] = useSearchParams();
   const sortParam = params.get('sort');
@@ -27,15 +31,21 @@ function useListParams() {
     sort: (productSortFields as readonly string[]).includes(sortParam ?? '') ? (sortParam as ProductSortField) : 'name',
     dir: params.get('dir') === 'desc' ? ('desc' as const) : ('asc' as const),
     lowStock: params.get('lowStock') === 'true',
+    after: params.get('after') ?? undefined,
+    before: params.get('before') ?? undefined,
   };
   const update = (changes: Partial<typeof state>) => {
-    const next = { ...state, ...changes };
+    // Anything but moving between pages starts again from the first page.
+    const paging = 'page' in changes || 'after' in changes || 'before' in changes;
+    const next = { ...state, ...(paging ? {} : { page: 1, after: undefined, before: undefined }), ...changes };
     const search = new URLSearchParams();
     if (next.q) search.set('q', next.q);
     if (next.page > 1) search.set('page', String(next.page));
     if (next.sort !== 'name') search.set('sort', next.sort);
     if (next.dir !== 'asc') search.set('dir', next.dir);
     if (next.lowStock) search.set('lowStock', 'true');
+    if (next.after) search.set('after', next.after);
+    if (next.before) search.set('before', next.before);
     // flushSync applies the change in the same frame, so controlled inputs like the checkbox don't flicker.
     setParams(search, { replace: true, flushSync: true });
   };
@@ -51,31 +61,43 @@ export function ProductsPage() {
   // Wait for a pause in typing before searching. Only the typed text should restart the timer.
   useEffect(() => {
     if (search === list.q) return;
-    const timer = setTimeout(() => setList({ q: search, page: 1 }), 300);
+    const timer = setTimeout(() => setList({ q: search }), 300);
     return () => clearTimeout(timer);
   }, [search]);
 
   const { data, error, isPending, isPlaceholderData } = useProducts({
     q: list.q || undefined,
-    page: list.page,
+    // A numbered page only when there's no cursor (e.g. an old bookmarked link).
+    page: list.after || list.before ? undefined : list.page,
+    after: list.after,
+    before: list.before,
     pageSize: PAGE_SIZE,
     sort: list.sort,
     dir: list.dir,
     lowStock: list.lowStock || undefined,
   });
 
+  // Past 10,000 matches the server stops counting, so the total reads "10,000+".
+  const totalText = data ? `${formatNumber(data.total)}${data.totalCapped ? '+' : ''}` : '';
   const pageCount = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
   const firstRow = data && data.total > 0 ? (list.page - 1) * PAGE_SIZE + 1 : 0;
-  const lastRow = data ? Math.min(list.page * PAGE_SIZE, data.total) : 0;
+  const lastRow = data ? (list.page - 1) * PAGE_SIZE + data.items.length : 0;
 
   const toggleSort = (key: ProductSortField) =>
-    setList({ sort: key, dir: list.sort === key && list.dir === 'asc' ? 'desc' : 'asc', page: 1 });
+    setList({ sort: key, dir: list.sort === key && list.dir === 'asc' ? 'desc' : 'asc' });
+  const goNext = () => data?.nextCursor && setList({ page: list.page + 1, after: data.nextCursor, before: undefined });
+  const goPrevious = () =>
+    list.page <= 2 || !data?.prevCursor
+      ? setList({ page: 1, after: undefined, before: undefined })
+      : setList({ page: list.page - 1, before: data.prevCursor, after: undefined });
 
   return (
     <>
       <PageHeader
         title="Products"
-        description={data ? `${formatNumber(data.total)} ${list.lowStock ? 'low on stock' : 'products'}` : undefined}
+        // While new results load, the previous ones stay on screen (dimmed). Their total would be
+        // wrong for the new filter, so it's hidden until the new results arrive.
+        description={data && !isPlaceholderData ? `${totalText} ${list.lowStock ? 'low on stock' : 'products'}` : ' '}
         actions={
           isOwner && (
           <Link
@@ -105,7 +127,7 @@ export function ProductsPage() {
           <input
             type="checkbox"
             checked={list.lowStock}
-            onChange={(e) => setList({ lowStock: e.target.checked, page: 1 })}
+            onChange={(e) => setList({ lowStock: e.target.checked })}
             className="size-4 accent-[var(--color-accent)]"
           />
           Low stock only
@@ -189,21 +211,22 @@ export function ProductsPage() {
       {data && data.total > 0 && (
         <nav aria-label="Pagination" className="mt-4 flex items-center justify-between gap-4 text-sm text-muted">
           <span>
-            Showing {formatNumber(firstRow)}–{formatNumber(lastRow)} of {formatNumber(data.total)}
+            Showing {formatNumber(firstRow)}–{formatNumber(lastRow)} of {totalText}
           </span>
           <div className="flex items-center gap-2">
-            <Button variant="secondary" size="sm" disabled={list.page <= 1} onClick={() => setList({ page: list.page - 1 })}>
+            <Button variant="secondary" size="sm" disabled={list.page <= 1 && !data?.prevCursor} onClick={goPrevious}>
               <ChevronLeft className="size-4" aria-hidden />
               Previous
             </Button>
             <span className="tabular-nums">
-              Page {list.page} of {pageCount}
+              Page {formatNumber(list.page)}
+              {!data.totalCapped && <> of {formatNumber(pageCount)}</>}
             </span>
             <Button
               variant="secondary"
               size="sm"
-              disabled={list.page >= pageCount}
-              onClick={() => setList({ page: list.page + 1 })}
+              disabled={!data?.nextCursor}
+              onClick={goNext}
             >
               Next
               <ChevronRight className="size-4" aria-hidden />

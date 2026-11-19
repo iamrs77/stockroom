@@ -39,6 +39,9 @@ export const productListQuerySchema = paginationQuerySchema.extend({
   sort: z.enum(productSortFields).default('name'),
   dir: z.enum(['asc', 'desc']).default('asc'),
   lowStock: z.stringbool().optional(),
+  /** Keyset paging: the page after or before a cursor from a previous response. Takes precedence over page. */
+  after: z.string().max(500).optional(),
+  before: z.string().max(500).optional(),
 });
 
 /** The list query as the web app sends it (the schema above parses it from URL strings). */
@@ -49,6 +52,8 @@ export type ProductListParams = {
   sort?: ProductSortField;
   dir?: 'asc' | 'desc';
   lowStock?: boolean;
+  after?: string;
+  before?: string;
 };
 
 export type ProductListItem = {
@@ -117,3 +122,19 @@ export const movementsQuerySchema = z.object({
   before: z.coerce.number().int().positive().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
+
+/**
+ * A page of the product list. Follow nextCursor / prevCursor (as `after` / `before`) to move
+ * between pages: each page then costs the same however deep it is. `page` is set only when the
+ * page was requested by number.
+ */
+export type ProductPage = {
+  items: ProductListItem[];
+  total: number;
+  /** True when there are more than `total` matches: counting stops at 10,000 to keep pages fast. */
+  totalCapped: boolean;
+  pageSize: number;
+  page: number | null;
+  nextCursor: string | null;
+  prevCursor: string | null;
+};

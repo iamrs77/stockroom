@@ -6,6 +6,7 @@ import type { Redis } from 'ioredis';
 import type { Db } from '../../db/client';
 import { outboxEvents, webhookDeliveries, webhookEndpoints } from '../../db/schema';
 import type { Logger } from '../../logger';
+import { webhookAttempts } from '../../metrics';
 import { createRedis, withTimeout } from '../../redis';
 import { postJson } from './safe-http';
 
@@ -119,6 +120,7 @@ export async function attemptDelivery(db: Db, deliveryId: string, options: { all
     options,
   );
   const ok = result.status !== undefined && result.status >= 200 && result.status < 300;
+  webhookAttempts.inc({ outcome: ok ? 'delivered' : 'failed' });
   await db
     .update(webhookDeliveries)
     .set({

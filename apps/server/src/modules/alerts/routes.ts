@@ -1,8 +1,8 @@
 import type { LowStockAlert } from '@stockroom/shared';
-import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull } from 'drizzle-orm';
 import { Router } from 'express';
 import type { AppDeps } from '../../app';
-import { lowStockAlerts, products, stockLevels } from '../../db/schema';
+import { lowStockAlerts, products } from '../../db/schema';
 import { getAuth } from '../../http/auth';
 
 export function alertsRouter({ db }: AppDeps) {
@@ -17,7 +17,7 @@ export function alertsRouter({ db }: AppDeps) {
         productId: products.id,
         sku: products.sku,
         name: products.name,
-        stock: sql<number>`coalesce((select sum(${stockLevels.quantity}) from ${stockLevels} where ${stockLevels.productId} = ${products.id}), 0)::int`,
+        stock: products.totalStock,
         reorderPoint: products.reorderPoint,
         stockAtOpen: lowStockAlerts.stockAtOpen,
         openedAt: lowStockAlerts.openedAt,

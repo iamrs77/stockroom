@@ -1,13 +1,15 @@
-import type { productCreateSchema, productListQuerySchema, productUpdateSchema } from '@stockroom/shared';
-import { and, asc, desc, eq, ilike, isNull, or, sql, type SQL } from 'drizzle-orm';
+import {
+  uuidSchema,
+  type productCreateSchema,
+  type productListQuerySchema,
+  type productUpdateSchema,
+} from '@stockroom/shared';
+import { and, asc, desc, eq, isNull, sql, type SQL } from 'drizzle-orm';
 import type { z } from 'zod';
 import { pgError, PG_UNIQUE_VIOLATION, type Db, type Executor } from '../../db/client';
 import { products, stockLevels, stores, transferLines, transfers } from '../../db/schema';
 import { HttpError, notFound } from '../../http/errors';
 import { syncLowStockAlerts } from '../events/outbox';
-
-/** Total quantity across all stores. Reads stock_levels by its primary key (product_id, store_id). */
-const totalStock = sql<number>`coalesce((select sum(sl.quantity) from ${stockLevels} sl where sl.product_id = ${products.id}), 0)::int`;
 
 const listColumns = {
   id: products.id,
@@ -16,17 +18,25 @@ const listColumns = {
   category: products.category,
   priceCents: products.priceCents,
   reorderPoint: products.reorderPoint,
-  totalStock,
+  // A stored column kept in step by triggers on stock_levels, so it can be sorted and filtered with an index.
+  totalStock: products.totalStock,
   updatedAt: products.updatedAt,
 };
 
-const sortColumns = {
-  name: products.name,
-  sku: products.sku,
-  price: products.priceCents,
-  stock: totalStock,
-  updated: products.updatedAt,
-};
+/** Each sort has an index on (tenant_id, column, id) over active products. `type` casts cursor values back. */
+const sorts = {
+  name: { column: products.name, type: 'text' },
+  sku: { column: products.sku, type: 'text' },
+  price: { column: products.priceCents, type: 'int' },
+  stock: { column: products.totalStock, type: 'int' },
+  updated: { column: products.updatedAt, type: 'timestamptz' },
+} as const;
+
+/**
+ * The page total is exact up to this many products, then shown as "10,000+". Counting stops there,
+ * so a page costs the same whether a business has ten thousand products or ten million.
+ */
+export const COUNT_CAP = 10_000;
 
 /** Escapes %, _ and \ so user input matches literally inside a LIKE pattern. */
 const escapeLike = (value: string) => value.replace(/[\\%_]/g, '\\$&');
@@ -34,31 +44,87 @@ const escapeLike = (value: string) => value.replace(/[\\%_]/g, '\\$&');
 export const activeProduct = (tenantId: string, productId: string) =>
   and(eq(products.id, productId), eq(products.tenantId, tenantId), isNull(products.archivedAt));
 
-export async function listProducts(db: Executor, tenantId: string, query: z.output<typeof productListQuerySchema>) {
+/**
+ * A cursor is the sort value and id of a row at the edge of a page. The value travels as Postgres's
+ * own text form, so timestamps keep their microseconds and a page boundary never drops or repeats a row.
+ */
+type Cursor = [value: string, id: string];
+const encodeCursor = (cursor: Cursor) => Buffer.from(JSON.stringify(cursor)).toString('base64url');
+function decodeCursor(raw: string): Cursor {
+  try {
+    const value: unknown = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+    if (Array.isArray(value) && value.length === 2 && typeof value[0] === 'string' && uuidSchema.safeParse(value[1]).success) {
+      return value as Cursor;
+    }
+  } catch {
+    // fall through
+  }
+  throw new HttpError(400, 'invalid_cursor', 'This page link is no longer valid. Go back to the first page.');
+}
+
+/**
+ * Lists products. Paging is keyset ("rows after this one"), so page 2,000 costs the same as page 1:
+ * the database seeks straight to the cursor in the sort's index instead of reading and discarding
+ * every earlier row the way OFFSET does. Asking for a page by number still works, using OFFSET.
+ */
+export async function listProducts(
+  db: Executor,
+  tenantId: string,
+  query: z.output<typeof productListQuerySchema>,
+) {
   const conditions: (SQL | undefined)[] = [eq(products.tenantId, tenantId), isNull(products.archivedAt)];
   if (query.q) {
-    const pattern = `%${escapeLike(query.q)}%`;
-    conditions.push(or(ilike(products.name, pattern), ilike(products.sku, pattern), ilike(products.category, pattern)));
+    // search_text is lower(name sku category) with a trigram index, so this doesn't read every row.
+    conditions.push(sql`${products.searchText} like ${`%${escapeLike(query.q.toLowerCase())}%`}`);
   }
   if (query.lowStock) {
-    conditions.push(sql`${products.reorderPoint} > 0 and ${totalStock} <= ${products.reorderPoint}`);
+    // A stored boolean with its own statistics and partial index (products_low_stock_idx).
+    conditions.push(sql`${products.lowStock}`);
   }
-  const where = and(...conditions);
-  const sortBy = sortColumns[query.sort];
+  const filter = and(...conditions);
 
-  const [items, counts] = await Promise.all([
+  const { column, type } = sorts[query.sort];
+  const cursorRaw = query.after ?? query.before;
+  const backwards = !query.after && !!query.before;
+  // Reading forwards in ascending order, or backwards in descending order, walks the index upwards.
+  const upwards = (query.dir === 'desc') === backwards;
+  let where = filter;
+  if (cursorRaw) {
+    const [value, id] = decodeCursor(cursorRaw);
+    where = and(filter, sql`(${column}, ${products.id}) ${sql.raw(upwards ? '>' : '<')} (${value}::${sql.raw(type)}, ${id}::uuid)`);
+  }
+  const byNumber = !cursorRaw && query.page > 1;
+
+  const [rows, counts] = await Promise.all([
     db
-      .select(listColumns)
+      .select({ ...listColumns, cursorValue: sql<string>`${column}::text` })
       .from(products)
       .where(where)
-      // The id tiebreaker keeps the order stable, so rows don't jump between pages.
-      .orderBy(query.dir === 'desc' ? desc(sortBy) : asc(sortBy), asc(products.id))
-      .limit(query.pageSize)
-      .offset((query.page - 1) * query.pageSize),
-    db.select({ count: sql<number>`count(*)::int` }).from(products).where(where),
+      // The id tiebreaker makes the order total, so rows never jump between pages.
+      .orderBy(...(upwards ? [asc(column), asc(products.id)] : [desc(column), desc(products.id)]))
+      .limit(query.pageSize + 1) // one extra row says whether there's another page
+      .offset(byNumber ? (query.page - 1) * query.pageSize : 0),
+    db.execute<{ count: number }>(
+      sql`select count(*)::int as count from (select 1 from ${products} where ${filter} limit ${COUNT_CAP + 1}) capped`,
+    ),
   ]);
+  const counted = counts.rows[0]?.count ?? 0;
 
-  return { items, total: counts[0]?.count ?? 0, page: query.page, pageSize: query.pageSize };
+  const more = rows.length > query.pageSize;
+  const page = rows.slice(0, query.pageSize);
+  if (backwards) page.reverse();
+  const first = page[0];
+  const last = page.at(-1);
+  return {
+    items: page.map(({ cursorValue: _, ...item }) => item),
+    total: Math.min(counted, COUNT_CAP),
+    totalCapped: counted > COUNT_CAP,
+    pageSize: query.pageSize,
+    page: cursorRaw ? null : query.page,
+    // Going backwards, the page we came from is always next. Going forwards, the extra row says.
+    nextCursor: last && (backwards || more) ? encodeCursor([last.cursorValue, last.id]) : null,
+    prevCursor: first && (backwards ? more : !!cursorRaw || byNumber) ? encodeCursor([first.cursorValue, first.id]) : null,
+  };
 }
 
 export async function getProduct(db: Executor, tenantId: string, productId: string) {

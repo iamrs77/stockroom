@@ -4,6 +4,7 @@ import { loadConfig } from './config';
 import { createDb, waitForDatabase } from './db/client';
 import { runMigrations } from './db/migrate';
 import { createLogger } from './logger';
+import { registerRuntimeGauges } from './metrics';
 import { createOutboxPoke, startOutboxRelay } from './modules/events/relay';
 import { ImportEvents } from './modules/imports/events';
 import { createImportQueue, startImportWorker } from './modules/imports/queue';
@@ -64,6 +65,7 @@ const webhookWorker = runsWorker
     })
   : undefined;
 const janitor = runsWorker ? startJanitor({ db, logger }) : undefined;
+registerRuntimeGauges({ db, pool, queues: { imports: importQueue.queue, webhooks: webhookQueue.queue } });
 if (runsWorker) logger.info({ importConcurrency: config.importConcurrency }, 'Background workers started');
 
 let server: Server | undefined;

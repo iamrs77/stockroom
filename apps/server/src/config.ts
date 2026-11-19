@@ -23,6 +23,8 @@ const envSchema = z.object({
   WEBHOOK_RETRY_DELAY_MS: z.coerce.number().int().positive().default(10_000),
   /** How often the outbox relay checks for events it wasn't told about (it's normally poked). */
   OUTBOX_POLL_MS: z.coerce.number().int().positive().default(30_000),
+  /** Bearer token for GET /metrics. Without it the endpoint is off in production. */
+  METRICS_TOKEN: z.string().min(16).optional(),
 });
 
 export type Config = {
@@ -45,6 +47,7 @@ export type Config = {
   webhookTimeoutMs: number;
   webhookRetryDelayMs: number;
   outboxPollMs: number;
+  metricsToken?: string;
 };
 
 const LOCAL_DATABASE_URL = 'postgres://postgres:postgres@localhost:5433/stockroom';
@@ -97,5 +100,6 @@ export function loadConfig(): Config {
     webhookTimeoutMs: env.WEBHOOK_TIMEOUT_MS,
     webhookRetryDelayMs: env.WEBHOOK_RETRY_DELAY_MS,
     outboxPollMs: env.OUTBOX_POLL_MS,
+    metricsToken: env.METRICS_TOKEN,
   };
 }

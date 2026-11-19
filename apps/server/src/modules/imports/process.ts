@@ -3,6 +3,7 @@ import { and, count, eq, inArray, sql } from 'drizzle-orm';
 import { pgError, PG_UNIQUE_VIOLATION, type Db } from '../../db/client';
 import { importErrors, importFiles, imports, stores } from '../../db/schema';
 import type { Logger } from '../../logger';
+import { importRowsProcessed } from '../../metrics';
 import { recordEvent } from '../events/outbox';
 import { applyChunk, type ChunkContext } from './apply-chunk';
 import { mapColumns, parseRow, type ImportRow, type RowError } from './columns';
@@ -122,6 +123,7 @@ export async function processImport(db: Db, importId: string, options: ProcessOp
         return { stored: toStore.length };
       });
       storedErrors += result.stored;
+      importRowsProcessed.inc(chunk.end - checkpoint);
       checkpoint = chunk.end;
       chunk = { rows: [], errors: [], errorRows: 0, end: checkpoint };
       options.pokeOutbox?.();
@@ -192,6 +194,11 @@ export async function processImport(db: Db, importId: string, options: ProcessOp
     options.pokeOutbox?.();
     await publish();
     logger.info({ importId, rows: totalRows }, 'Import completed');
+    if (totalRows >= 10_000) {
+      // A big load leaves the planner's statistics stale until autovacuum notices; refresh them now
+      // so the next queries get good plans (e.g. the low-stock index once thousands of products qualify).
+      await db.execute(sql`analyze products, stock_levels`).catch((err: Error) => logger.warn({ err: err.message }, 'ANALYZE after import failed'));
+    }
     return 'completed';
   } catch (err) {
     if (err instanceof Superseded) {

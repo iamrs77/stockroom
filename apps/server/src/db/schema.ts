@@ -91,18 +91,44 @@ export const products = pgTable(
     category: text('category'),
     priceCents: integer('price_cents').notNull(),
     reorderPoint: integer('reorder_point').notNull().default(0),
+    /**
+     * Sum of this product's stock_levels, kept in step by statement-level triggers on stock_levels
+     * (migration 0005). Stored so lists can sort and filter by stock with an index instead of
+     * adding up every product's stock on each request.
+     */
+    totalStock: integer('total_stock').notNull().default(0),
+    /**
+     * At or below the reorder point. Stored as its own column because Postgres can't estimate a
+     * comparison between two columns (it guesses a third of rows match), but it keeps exact
+     * statistics for a boolean, so the low-stock filter gets the right plan.
+     */
+    lowStock: boolean('low_stock').generatedAlwaysAs(sql`reorder_point > 0 and total_stock <= reorder_point`),
+    /** What search matches against: name, SKU and category, lower-cased, with a trigram index. */
+    searchText: text('search_text').generatedAlwaysAs(sql`lower(name || ' ' || sku || ' ' || coalesce(category, ''))`),
     /** Products are archived, not deleted, so their stock history stays intact. */
     archivedAt: timestamp('archived_at', { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [
-    // A SKU is unique among a tenant's active products; archiving one frees the SKU.
-    uniqueIndex('products_tenant_sku_key').on(t.tenantId, t.sku).where(sql`archived_at is null`),
-    index('products_tenant_name_idx').on(t.tenantId, t.name),
-    check('products_price_nonnegative', sql`${t.priceCents} >= 0`),
-    check('products_reorder_point_nonnegative', sql`${t.reorderPoint} >= 0`),
-  ],
+  (t) => {
+    // Every list sort reads one of these: (tenant, sort value, id) over active products, so a page
+    // is an index range scan whichever way it's sorted, and the id makes the order total for paging.
+    const active = sql`archived_at is null`;
+    return [
+      // A SKU is unique among a tenant's active products; archiving one frees the SKU.
+      uniqueIndex('products_tenant_sku_key').on(t.tenantId, t.sku).where(active),
+      index('products_active_name_idx').on(t.tenantId, t.name, t.id).where(active),
+      index('products_active_stock_idx').on(t.tenantId, t.totalStock, t.id).where(active),
+      index('products_active_price_idx').on(t.tenantId, t.priceCents, t.id).where(active),
+      index('products_active_updated_idx').on(t.tenantId, t.updatedAt, t.id).where(active),
+      // Small: only active products that are low on stock, in the list's default order.
+      index('products_low_stock_idx').on(t.tenantId, t.name, t.id).where(sql`archived_at is null and low_stock`),
+      index('products_search_trgm_idx').using('gin', t.searchText.op('gin_trgm_ops')),
+      check('products_price_nonnegative', sql`${t.priceCents} >= 0`),
+      check('products_reorder_point_nonnegative', sql`${t.reorderPoint} >= 0`),
+      check('products_total_stock_nonnegative', sql`${t.totalStock} >= 0`),
+    ];
+  },
 );
 
 /**
